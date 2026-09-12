@@ -55,15 +55,21 @@ setClaudePathProvider(async () => {
   return settings.claudePath;
 });
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", async (req, res) => {
+  // quick=1 is the desktop shell asking "are you up?" while the window waits
+  // to open. The full answer spends a Claude turn on the tutor self-test and
+  // seven toolchain spawns; neither belongs between a double-click and a
+  // window. Both still happen: in the background from the listen callback,
+  // and on the UI's own health fetch.
+  const quick = req.query.quick === "1";
   // Installing Claude Code while the app is open should be enough — no restart.
-  await refreshTutorStatus().catch(() => {});
+  if (!quick) await refreshTutorStatus().catch(() => {});
   const auth = getAuthStatus();
   const tutor = getTutorStatus();
   res.json({
     ok: true,
     version: "0.1.0",
-    runtimes: await detectRuntimes(),
+    runtimes: quick ? null : await detectRuntimes(),
     // Coarse legacy view: "failed" covers both ways the tutor can be off.
     sdkAuth: auth.status,
     sdkAuthDetail: auth.detail,

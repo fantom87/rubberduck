@@ -1,4 +1,3 @@
-import initSqlJs from "sql.js";
 import type { RunResult } from "@teacher/shared";
 import { formatSqlResults, runSqlProgram } from "@teacher/shared";
 
@@ -8,7 +7,7 @@ import { formatSqlResults, runSqlProgram } from "@teacher/shared";
 // server's in-process runner (@teacher/shared sqlFormat), so a lesson's
 // stdout check byte-matches whichever side produced the output.
 
-type SqlJsStatic = Awaited<ReturnType<typeof initSqlJs>>;
+type SqlJsStatic = Awaited<ReturnType<(typeof import("sql.js"))["default"]>>;
 
 let sqlJsInit: Promise<SqlJsStatic> | null = null;
 
@@ -16,7 +15,9 @@ function getSqlJs(): Promise<SqlJsStatic> {
   if (!sqlJsInit) {
     // scripts/copy-pyodide.mjs copies the wasm next to index.html, so the
     // fetch stays on the app's own origin.
-    sqlJsInit = initSqlJs({ locateFile: (file: string) => `/${file}` });
+    // sql.js's JS glue is 39 kB and only SQL lessons need it — loaded with the
+    // wasm on first use, not in the boot chunk.
+    sqlJsInit = import("sql.js").then(({ default: initSqlJs }) => initSqlJs({ locateFile: (file: string) => `/${file}` }));
     sqlJsInit.catch(() => {
       sqlJsInit = null; // a failed load shouldn't poison every later run
     });

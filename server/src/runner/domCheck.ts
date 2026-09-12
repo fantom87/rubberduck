@@ -1,11 +1,21 @@
-import { JSDOM } from "jsdom";
+import type { JSDOM } from "jsdom";
 import type { DomAssertion } from "@teacher/shared";
 import { describeAssertion, inlineStylesheets, type DomAssertionOutcome } from "@teacher/shared";
 
 // Canonical dom-check evaluation. jsdom parses HTML + stylesheets but does no
 // layout — content authoring rules route visual/layout outcomes to ai-judge.
 
-export function buildDocument(files: Record<string, string>): { html: string; dom: JSDOM } {
+// jsdom is most of the server's boot time (1.1 s of 1.4 s measured) and only
+// HTML/CSS lessons use it. Load it on first use; the bundler turns this into
+// a runtime require of the staged package.
+let jsdomModule: Promise<typeof import("jsdom")> | null = null;
+function loadJsdom(): Promise<typeof import("jsdom")> {
+  jsdomModule ??= import("jsdom");
+  return jsdomModule;
+}
+
+export async function buildDocument(files: Record<string, string>): Promise<{ html: string; dom: JSDOM }> {
+  const { JSDOM } = await loadJsdom();
   const entry = Object.keys(files).find((f) => f.endsWith(".html")) ?? "index.html";
   // Inline linked local stylesheets so cssRule assertions can see them (the
   // shared helper keeps this in lock-step with the browser preview).
@@ -41,11 +51,11 @@ function cssRuleMatches(dom: JSDOM, selector: string, property: string, equals: 
   return { ok: found.toLowerCase() === equals.trim().toLowerCase(), found };
 }
 
-export function evaluateDomAssertions(files: Record<string, string>, assertions: DomAssertion[]): {
-  outcomes: DomAssertionOutcome[];
-  domSnapshot: string;
-} {
-  const { dom } = buildDocument(files);
+export async function evaluateDomAssertions(
+  files: Record<string, string>,
+  assertions: DomAssertion[],
+): Promise<{ outcomes: DomAssertionOutcome[]; domSnapshot: string }> {
+  const { dom } = await buildDocument(files);
   const doc = dom.window.document;
 
   const outcomes: DomAssertionOutcome[] = assertions.map((a) => {

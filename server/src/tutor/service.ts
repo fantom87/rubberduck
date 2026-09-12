@@ -309,7 +309,7 @@ function buildTools(deps: TutorDeps, session: TutorSession) {
       let result: RunResult;
       if (lesson.language === "html-css") {
         const assertions = lesson.checks.flatMap((c) => (c.type === "dom" ? c.assertions : []));
-        const { domSnapshot } = evaluateDomAssertions(files, assertions);
+        const { domSnapshot } = await evaluateDomAssertions(files, assertions);
         result = { ok: true, exitCode: 0, stdout: "", stderr: "", durationMs: 0, timedOut: false, domSnapshot };
       } else {
         const missing = await missingRuntimeMessage(lesson.language);

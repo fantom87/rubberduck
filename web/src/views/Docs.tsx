@@ -22,6 +22,8 @@ export default function Docs({ initial, compact }: Props) {
   const [search, setSearch] = useState("");
   const [current, setCurrent] = useState<string | null>(initial ?? null);
   const [markdown, setMarkdown] = useState<string>("");
+  // Parsed when the page changes, not on every keystroke in the search box.
+  const docHtml = useMemo(() => renderMarkdown(markdown), [markdown]);
   // Lazily built on first search: "section/slug" → lowercased page headings,
   // so search covers headings without shipping them in the index.
   const [headings, setHeadings] = useState<Record<string, string[]> | null>(null);
@@ -127,7 +129,7 @@ export default function Docs({ initial, compact }: Props) {
       </nav>
       <article className="docs-body lesson-md">
         {current ? (
-          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }} />
+          <div dangerouslySetInnerHTML={{ __html: docHtml }} />
         ) : (
           <p className="dim">Pick a page — or search. These docs are always one Ctrl+D away.</p>
         )}

@@ -14,8 +14,12 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const PORT = 4517; // hard-coded in the server too
-const APP_URL = `http://localhost:${PORT}`;
-const DEV_UI_URL = "http://localhost:5173"; // Vite, when a dev session is running
+// 127.0.0.1, never localhost: the server binds IPv4 only, and Chromium
+// resolves localhost to ::1 first, waits for that connection to fail, then
+// falls back. Measured at 200 ms on every cold socket — the first request
+// after any pause longer than Node's 5 s keep-alive, which is most clicks.
+const APP_URL = `http://127.0.0.1:${PORT}`;
+const DEV_UI_URL = "http://127.0.0.1:5173"; // Vite, when a dev session is running
 const KEEP_LOGS = 5;
 const CUSTOM_UNIT_ID = "90-custom"; // must match server/src/tutor/author.ts
 const CONTENT_STAMP = ".packaged-content-version";
@@ -227,12 +231,13 @@ function logLine(text) {
 }
 
 /**
- * @param timeoutMs generous while waiting for a cold start: /api/health probes
- * the local toolchains, and on a first run that can take seconds.
+ * quick=1 skips the tutor self-test and the toolchain probes. This only asks
+ * whether the server is up; the window shouldn't wait on either.
+ * @param timeoutMs generous while waiting for a cold start.
  */
 function ping(timeoutMs = 1500) {
   return new Promise((resolve) => {
-    const req = http.get(`${APP_URL}/api/health`, (res) => {
+    const req = http.get(`${APP_URL}/api/health?quick=1`, (res) => {
       res.resume();
       resolve(res.statusCode === 200);
     });
@@ -262,7 +267,7 @@ function servesHtml(url) {
 
 function healthJson() {
   return new Promise((resolve) => {
-    const req = http.get(`${APP_URL}/api/health`, (res) => {
+    const req = http.get(`${APP_URL}/api/health?quick=1`, (res) => {
       let body = "";
       res.on("data", (d) => (body += d));
       res.on("end", () => {

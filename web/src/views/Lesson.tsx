@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssistanceLevel, CheckResult, Lesson, RunResult } from "@teacher/shared";
 import { buildJsTestProgram, buildPyTestProgram, evaluateStdoutCheck, evaluateTestsCheck, extractTestEvents } from "@teacher/shared";
 import EditorPane from "../components/EditorPane";
@@ -158,6 +158,14 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
   const draftKeyRef = useRef(lessonKey);
   const paneSizesRef = useRef(paneSizes);
   paneSizesRef.current = paneSizes;
+  // Parsed once per lesson, not once per keystroke: renderMarkdown runs
+  // marked, Lezer highlighting and DOMPurify (1–8 ms a call), and this
+  // component re-renders on every editor change.
+  const bodyHtml = useMemo(() => (lesson ? renderMarkdown(lesson.body) : ""), [lesson?.body]);
+  // Stable identities for the chat pane's props, so a keystroke here doesn't
+  // re-render the whole transcript there.
+  const getTutorContext = useCallback(() => ({ files: filesRef.current, lastRun: resultRef.current }), []);
+  const clearPendingTutorMsg = useCallback(() => setPendingTutorMsg(null), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -393,24 +401,29 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
     const rect = layoutRef.current.getBoundingClientRect();
     if (rect.width <= 0) return;
     const pct = ((e.clientX - rect.left) / rect.width) * 100;
-    setPaneSizes(([lessonPct, , tutorPct]) => {
-      let l = lessonPct;
-      let t = tutorPct;
-      if (divider === 0) l = Math.min(Math.max(pct, 15), 100 - t - 20);
-      else t = Math.min(Math.max(100 - pct, 12), 100 - l - 20);
-      return [l, 100 - l - t, t];
-    });
+    const [lessonPct, , tutorPct] = paneSizesRef.current;
+    let l = lessonPct;
+    let t = tutorPct;
+    if (divider === 0) l = Math.min(Math.max(pct, 15), 100 - t - 20);
+    else t = Math.min(Math.max(100 - pct, 12), 100 - l - 20);
+    const next = [l, 100 - l - t, t];
+    // Drive the CSS variables directly while dragging. A setState per pointer
+    // event re-rendered the whole workspace — markdown body, chat, checklist —
+    // on every pixel; React sees the final sizes once, in paneDragEnd.
+    paneSizesRef.current = next;
+    const style = layoutRef.current.style;
+    style.setProperty("--pane-lesson", `${next[0]}%`);
+    style.setProperty("--pane-work", `${next[1]}%`);
+    style.setProperty("--pane-tutor", `${next[2]}%`);
   }
 
   function paneDragEnd() {
     if (!paneDragging.current) return;
     paneDragging.current = false;
     const sizes = paneSizesRef.current.map((n) => Math.round(n * 10) / 10);
+    setPaneSizes(sizes);
     cachedPaneSizes = sizes;
-    api
-      .settings()
-      .then((s) => api.saveSettings({ ...s, layout: { ...(s.layout ?? {}), paneSizes: sizes } }))
-      .catch(() => {});
+    api.saveSettings({ ...settings, layout: { ...(settings.layout ?? {}), paneSizes: sizes } }).catch(() => {});
   }
 
   const paneDivider = (divider: 0 | 1, label: string) => (
@@ -535,7 +548,7 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
             💡 Show a hint ({hintsLeft} left)
           </button>
         )}
-        <div className="lesson-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(lesson.body) }} />
+        <div className="lesson-md" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
       </section>
 
       {paneDivider(0, "Resize lesson pane")}
@@ -595,10 +608,10 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
           lessonKey={lessonKey}
           level={level}
           onLevelChange={handleLevelChange}
-          getContext={() => ({ files: filesRef.current, lastRun: resultRef.current })}
+          getContext={getTutorContext}
           onEvent={handleTutorEvent}
           pendingMessage={pendingTutorMsg}
-          onPendingConsumed={() => setPendingTutorMsg(null)}
+          onPendingConsumed={clearPendingTutorMsg}
           tutorAvailable={tutorAvailable}
           tutorState={tutorState}
         />

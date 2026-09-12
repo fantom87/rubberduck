@@ -107,7 +107,7 @@ export async function runCheckPass(
         break;
       }
       case "dom": {
-        const { outcomes, domSnapshot } = evaluateDomAssertions(files, spec.assertions);
+        const { outcomes, domSnapshot } = await evaluateDomAssertions(files, spec.assertions);
         baseRun ??= {
           ok: true,
           exitCode: 0,

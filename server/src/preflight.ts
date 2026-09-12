@@ -82,5 +82,10 @@ export async function detectRuntimes(force = false): Promise<RuntimeStatus> {
       probing = null;
     }
   })();
+  // A stale answer now beats a fresh one in half a second. Run and Check ask
+  // about one language, and a runtime installed in the last minute is picked
+  // up by the probe that just started; the next caller gets the fresh set.
+  // Only the first call (nothing cached yet) and an explicit force wait.
+  if (!force && cached) return cached.status;
   return probing;
 }

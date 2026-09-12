@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { AssistanceLevel, RunResult } from "@teacher/shared";
 import AssistanceSlider from "./AssistanceSlider";
 import { openTutorStream, type TutorEvent } from "../api/tutorStream";
@@ -31,6 +31,15 @@ interface Props {
   /** which kind of unreachable — the two have different fixes. */
   tutorState?: TutorState;
 }
+
+/**
+ * Memoised on its text: a streamed token used to push every message in the
+ * transcript back through marked + DOMPurify. Now only the message that grew
+ * re-renders, and the rest are skipped by reference.
+ */
+const AssistantMessage = memo(function AssistantMessage({ text }: { text: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+});
 
 const CHIP_LABEL: Record<string, string> = {
   run_code: "Ran your code",
@@ -305,7 +314,7 @@ export default function TutorChat({
                 ) : (
                   <div key={i} className={`chat-msg ${item.role}`}>
                     {item.role === "assistant" ? (
-                      <div dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />
+                      <AssistantMessage text={item.text} />
                     ) : (
                       item.text
                     )}
@@ -346,7 +355,7 @@ export default function TutorChat({
           ) : (
             <div key={i} className={`chat-msg ${item.role}`}>
               {item.role === "assistant" ? (
-                <div dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />
+                <AssistantMessage text={item.text} />
               ) : (
                 item.text
               )}

@@ -31,13 +31,15 @@ export default defineConfig({
     ...(remote ? { host: true, allowedHosts } : {}),
     proxy: {
       // changeOrigin is load-bearing, not decoration: it rewrites the Host
-      // header to "localhost:4517" on the hop to the API server, whose own
-      // guard (server/src/index.ts) accepts localhost only. Behind the
+      // header to "127.0.0.1:4517" on the hop to the API server, whose own
+      // guard (server/src/index.ts) accepts loopback names only. Behind the
       // Codespaces proxy the inbound Host is "<codespace>-5173.app.github.dev",
       // which the API would reject with 403 — so every /api call would fail.
       // Vite's string-shorthand proxy form defaults this to true today;
       // spelling it out means a Vite upgrade can't quietly break the app.
-      "/api": { target: "http://localhost:4517", changeOrigin: true },
+      // 127.0.0.1, because the API binds IPv4 only and a "localhost" target
+      // can try ::1 first and eat a timeout on every cold socket.
+      "/api": { target: "http://127.0.0.1:4517", changeOrigin: true },
     },
   },
 });

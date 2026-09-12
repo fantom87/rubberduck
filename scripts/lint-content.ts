@@ -38,7 +38,7 @@ async function checkLesson(key: string, lesson: Lesson, solution: Record<string,
   for (const spec of lesson.checks) {
     if (spec.type === "ai-judge") continue; // costs tutor tokens; judged live instead
     if (spec.type === "dom") {
-      const { outcomes } = evaluateDomAssertions(files, spec.assertions);
+      const { outcomes } = await evaluateDomAssertions(files, spec.assertions);
       results.push(evaluateDomCheck(spec, outcomes));
     } else if (spec.type === "stdout") {
       const run = await runLocal(DATA, {

@@ -71,7 +71,7 @@ export function runRoutes(contentDir: string, dataDir: string): Router {
     if (lesson.language === "html-css") {
       // "Running" HTML = parse + snapshot; the browser shows the live preview.
       const allAssertions = lesson.checks.flatMap((c) => (c.type === "dom" ? c.assertions : []));
-      const { domSnapshot } = evaluateDomAssertions(files, allAssertions);
+      const { domSnapshot } = await evaluateDomAssertions(files, allAssertions);
       res.json({ ok: true, exitCode: 0, stdout: "", stderr: "", durationMs: 0, timedOut: false, domSnapshot });
       return;
     }
