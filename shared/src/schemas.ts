@@ -29,6 +29,10 @@ export const domAssertionSchema = z.union([
   }),
 ]);
 
+/** An editor's worth of files, path -> contents. The shape every run, check,
+ *  draft, snapshot and tutor message carries; validated once, in one place. */
+export const filesSchema = z.record(z.string(), z.string());
+
 export const checkSpecSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),

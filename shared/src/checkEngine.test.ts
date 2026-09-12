@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   buildJsTestProgram,
@@ -200,5 +201,43 @@ describe("inlineStylesheets", () => {
     const tricky = "h1::before { content: '$&'; }";
     const out = inlineStylesheets('<link href="styles.css">', { "styles.css": tricky });
     expect(out).toContain(tricky);
+  });
+});
+
+describe("JS test harness toEqual", () => {
+  // Run the combined program the way the runners would, with console.log
+  // captured, then read the harness events back out of it.
+  function runHarness(userCode: string, testSource: string) {
+    const nonce = "abc123";
+    const lines: string[] = [];
+    const program = buildJsTestProgram(userCode, testSource, nonce);
+    runInNewContext(program, { console: { log: (s: unknown) => lines.push(String(s)) } });
+    return extractTestEvents(lines.join("\n"), nonce)[1];
+  }
+
+  it("is structural, so key order doesn't matter", () => {
+    const events = runHarness(
+      `function settings() { return { volume: 3, theme: "dark" }; }`,
+      `test("shape", () => expect(settings()).toEqual({ theme: "dark", volume: 3 }));`,
+    );
+    expect(events).toEqual([{ name: "shape", passed: true }]);
+  });
+
+  it("still fails on a real difference", () => {
+    const events = runHarness(
+      `function settings() { return { volume: 4, theme: "dark" }; }`,
+      `test("shape", () => expect(settings()).toEqual({ theme: "dark", volume: 3 }));`,
+    );
+    expect(events[0].passed).toBe(false);
+    expect(events[0].message).toContain("expected");
+  });
+
+  it("compares nested arrays and NaN sensibly", () => {
+    const events = runHarness(
+      `const grid = [[1, NaN], [2, { a: [3] }]];`,
+      `test("nested", () => expect(grid).toEqual([[1, NaN], [2, { a: [3] }]]));
+       test("length", () => expect([1, 2]).toEqual([1, 2, 3]));`,
+    );
+    expect(events.map((e) => e.passed)).toEqual([true, false]);
   });
 });

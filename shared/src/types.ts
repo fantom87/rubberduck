@@ -105,6 +105,8 @@ export interface Lesson extends LessonMeta {
   nextLessonKey?: string | null;
   /** present only when this Lesson is a projected stage of a tutorial project */
   stage?: StageRef;
+  /** the file the runners execute; for a stage it comes from the project, never from files[0] */
+  entry?: string;
 }
 
 /**

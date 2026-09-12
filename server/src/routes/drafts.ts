@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Router } from "express";
 import { readJson, writeJson } from "../store/jsonStore.js";
+import { parseFiles } from "./files.js";
 
 // Auto-saved editor contents per lesson (and playground scratchpads).
 // Draft ids are lesson keys ("python/01-first-steps/01-hello-world") or
@@ -29,13 +30,9 @@ export function draftRoutes(dataDir: string): Router {
 
   r.put("/api/drafts", async (req, res) => {
     const id = String(req.query.id ?? "");
-    const files = req.body?.files;
-    if (!ID_RE.test(id) || typeof files !== "object" || files === null || Array.isArray(files)) {
-      res.status(400).json({ error: "valid id and files required" });
-      return;
-    }
-    if (Object.values(files).some((v) => typeof v !== "string")) {
-      res.status(400).json({ error: "every file value must be a string" });
+    const files = parseFiles(req.body?.files);
+    if (!ID_RE.test(id) || !files) {
+      res.status(400).json({ error: "valid id and files (path -> string) required" });
       return;
     }
     await writeJson(draftFile(dataDir, id), { files, savedAt: new Date().toISOString() });

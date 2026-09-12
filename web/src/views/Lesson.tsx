@@ -285,7 +285,7 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
 
   async function handleRun() {
     if (!lesson || running) return;
-    const entry = lesson.files[0].path;
+    const entry = lesson.entry ?? lesson.files[0].path;
     setRunning(true);
     setNotice(null);
     try {

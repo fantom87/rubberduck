@@ -318,7 +318,7 @@ function buildTools(deps: TutorDeps, session: TutorSession) {
         }
         result = await runLocal(dataDir, {
           language: lesson.language,
-          entry: lesson.files[0].path,
+          entry: lesson.entry ?? lesson.files[0].path,
           files,
           timeoutMs: lesson.timeoutMs,
         });
@@ -599,7 +599,14 @@ export async function sendMessage(
       // Concurrency cap: one live lesson conversation at a time. Closing the
       // others is invisible — resume revives them on their next message.
       for (const other of sessions.values()) {
-        if (other.mode === "lesson" && other.key !== key) closeSession(other);
+        if (other.mode === "lesson" && other.key !== key) {
+          closeSession(other);
+          // Drop it from the map now. startSession's finally would do it, but
+          // only after the SDK finishes the in-flight turn — and in that window
+          // a message for the closed key would be pushed onto a queue nothing
+          // drains.
+          sessions.delete(other.key);
+        }
       }
     }
     session = {

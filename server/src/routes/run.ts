@@ -14,6 +14,7 @@ import { updateChecks } from "../tutor/service.js";
 import { takeSnapshot, listSnapshots, getSnapshot } from "../store/snapshots.js";
 import { detectRuntimes, type RuntimeStatus } from "../preflight.js";
 import { missingRuntimeHint } from "../runtimeHints.js";
+import { parseFiles } from "./files.js";
 
 /** "That runtime isn't installed" with an install command for THIS OS, or
  *  null when the language can run here. */
@@ -50,11 +51,12 @@ export function runRoutes(contentDir: string, dataDir: string): Router {
   // Local-runner execution of the user's editor files (no goal checking).
   // Accepts real lesson keys and playground pseudo-lessons.
   r.post("/api/run", async (req, res) => {
-    const { lessonId, files } = req.body ?? {};
+    const { lessonId } = req.body ?? {};
+    const files = parseFiles(req.body?.files);
     const { resolveLesson } = await import("./tutor.js");
     const lesson = (await resolveLesson(contentDir, String(lessonId)))?.lesson;
-    if (!lesson || typeof files !== "object") {
-      res.status(400).json({ error: "lessonId and files required" });
+    if (!lesson || !files) {
+      res.status(400).json({ error: "lessonId and files (path -> string) required" });
       return;
     }
     const runtimes = await detectRuntimes();
@@ -76,7 +78,7 @@ export function runRoutes(contentDir: string, dataDir: string): Router {
 
     const result = await runLocal(dataDir, {
       language: lesson.language,
-      entry: lesson.files[0].path,
+      entry: lesson.entry ?? lesson.files[0].path,
       files,
       timeoutMs: lesson.timeoutMs,
       lessonKey: String(lessonId),
@@ -88,11 +90,12 @@ export function runRoutes(contentDir: string, dataDir: string): Router {
   // lesson per completionVerdict — every check must pass, except an ai-judge
   // that was unreachable (offline/auth down), which never blocks completion.
   r.post("/api/check", async (req, res) => {
-    const { lessonId, files } = req.body ?? {};
+    const { lessonId } = req.body ?? {};
+    const files = parseFiles(req.body?.files);
     const cur = await getCurriculum(contentDir);
     const lesson = cur.lessons.get(String(lessonId));
-    if (!lesson || typeof files !== "object") {
-      res.status(400).json({ error: "lessonId and files required" });
+    if (!lesson || !files) {
+      res.status(400).json({ error: "lessonId and files (path -> string) required" });
       return;
     }
     const runtimes = await detectRuntimes();
@@ -122,9 +125,10 @@ export function runRoutes(contentDir: string, dataDir: string): Router {
 
   // Browser-runner lessons execute client-side; they report snapshots here.
   r.post("/api/snapshots", async (req, res) => {
-    const { lessonId, files, trigger } = req.body ?? {};
-    if (!lessonId || typeof files !== "object") {
-      res.status(400).json({ error: "lessonId and files required" });
+    const { lessonId, trigger } = req.body ?? {};
+    const files = parseFiles(req.body?.files);
+    if (!lessonId || !files) {
+      res.status(400).json({ error: "lessonId and files (path -> string) required" });
       return;
     }
     await recordAttempt(dataDir, String(lessonId));

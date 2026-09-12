@@ -79,6 +79,14 @@ describe("progress store", () => {
     expect(lapsed.streak.best).toBe(1);
   });
 
+  it("reports the first completion once, from inside the lock", async () => {
+    // Two overlapping completions used to both read "not yet done" before
+    // either wrote — and both journaled. Now exactly one sees first: true.
+    const results = await Promise.all([completeLesson(dataDir, "a/b/c"), completeLesson(dataDir, "a/b/c")]);
+    expect(results.filter((r) => r.first).length).toBe(1);
+    expect((await completeLesson(dataDir, "a/b/c")).first).toBe(false);
+  });
+
   it("increments the streak across consecutive days", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 2, 1, 20, 0, 0));

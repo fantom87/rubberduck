@@ -167,9 +167,21 @@ export const JS_TEST_HARNESS = `
 const __check_prefix = "__TEST____NONCE____";
 const __check_log = console.log.bind(console);
 const __check_assert = (ok, msg) => { if (!ok) throw new Error(msg); };
+// Structural equality. JSON.stringify comparison made {a, b} unequal to {b, a}
+// and collapsed NaN, undefined and Map/Set — correct learner code was going red.
+const __check_eq = (a, b) => {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === b.length && a.every((v, i) => __check_eq(v, b[i]));
+  if (a instanceof Map && b instanceof Map) return __check_eq([...a].sort(), [...b].sort());
+  if (a instanceof Set && b instanceof Set) return __check_eq([...a].sort(), [...b].sort());
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && __check_eq(a[k], b[k]));
+};
 const __check_expect = (actual) => ({
   toBe(expected) { __check_assert(Object.is(actual, expected), "expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual)); },
-  toEqual(expected) { __check_assert(JSON.stringify(actual) === JSON.stringify(expected), "expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual)); },
+  toEqual(expected) { __check_assert(__check_eq(actual, expected), "expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual)); },
   toContain(item) { __check_assert(actual.includes(item), JSON.stringify(actual) + " does not contain " + JSON.stringify(item)); },
   toBeTruthy() { __check_assert(!!actual, JSON.stringify(actual) + " is not truthy"); },
 });

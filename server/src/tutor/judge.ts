@@ -36,11 +36,20 @@ export type OneShotResult = { ok: true; text: string } | { ok: false; reason: st
 
 // Also used by tutor/author.ts (custom lesson generation) — same no-tools,
 // single-turn, subscription-auth query shape.
+// A wedged Claude subprocess would otherwise pin the caller open for good —
+// for the ai-judge that is the Check button never settling. Generous, because
+// a real grading turn on a slow machine can take a while.
+const ONE_SHOT_TIMEOUT_MS = 90_000;
+
 export async function oneShot(prompt: string, systemPrompt: string, model: string): Promise<OneShotResult> {
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), ONE_SHOT_TIMEOUT_MS);
+  timer.unref();
   try {
     for await (const message of query({
       prompt,
       options: {
+        abortController,
         // The learner's own Claude Code, when they have one — we ship none.
         ...(await claudeExecutableOption()),
         model,
@@ -56,8 +65,14 @@ export async function oneShot(prompt: string, systemPrompt: string, model: strin
       }
     }
   } catch (err) {
+    if (abortController.signal.aborted) {
+      console.error(`[judge] query timed out after ${ONE_SHOT_TIMEOUT_MS / 1000}s`);
+      return { ok: false, reason: "timeout" };
+    }
     console.error("[judge] query failed:", err);
     return { ok: false, reason: String(err) };
+  } finally {
+    clearTimeout(timer);
   }
   return { ok: false, reason: "no result message" };
 }

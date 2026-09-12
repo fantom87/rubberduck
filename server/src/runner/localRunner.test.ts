@@ -227,6 +227,24 @@ describe("curriculum loader", () => {
     }
   });
 
+  it("projects a tutorial project's stages with the workspace carried forward", async () => {
+    const contentDir = path.resolve(__dirname, "..", "..", "..", "content");
+    const cur = await loadCurriculum(contentDir);
+    const key = "javascript/02-functions-arrays-objects/snake";
+    const project = cur.projects.get(key);
+    expect(project?.stages.length).toBe(3);
+    const [s1, s2, s3] = project!.stages.map((id) => cur.lessons.get(`${key}/${id}`)!);
+    // The project's entry reaches every stage — the runners must never fall
+    // back to files[0], which for a stage is readdir order.
+    for (const stage of [s1, s2, s3]) expect(stage.entry).toBe(project!.entry);
+    expect(s1.stage).toMatchObject({ projectKey: key, stageIndex: 0, stageCount: 3 });
+    // Stage N starts from the seed plus every earlier stage's solution delta.
+    expect(s1.starterFiles["snake.js"]).not.toContain("function step");
+    expect(s2.starterFiles["snake.js"]).not.toContain("function step");
+    expect(s3.starterFiles["snake.js"]).toContain("function step");
+    expect(s3.starterFiles["snake.js"]).not.toContain("score += 1");
+  });
+
   it("reports missing lesson folders with actionable errors", async () => {
     const dir = path.join(tmpData, "content-fixture");
     await fs.mkdir(path.join(dir, "tracks", "python"), { recursive: true });

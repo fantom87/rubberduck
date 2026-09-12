@@ -8,6 +8,7 @@ import { getJournal, getProfile, setProfile } from "../store/profile.js";
 import { resolvePaths } from "../paths.js";
 import { allDocSlugs } from "./docs.js";
 import { setSolutionProvider } from "../tutor/judge.js";
+import { parseFiles } from "./files.js";
 import {
   hub,
   interruptSession,
@@ -130,10 +131,11 @@ export function tutorRoutes(contentDir: string, dataDir: string): Router {
   });
 
   r.post("/api/tutor/message", async (req, res) => {
-    const { lessonId, text, files, lastRun, lastChecks, level } = req.body ?? {};
+    const { lessonId, text, lastRun, lastChecks, level } = req.body ?? {};
+    const files = parseFiles(req.body?.files);
     const resolved = await resolveLesson(contentDir, String(lessonId));
-    if (!resolved || typeof text !== "string" || typeof files !== "object") {
-      res.status(400).json({ error: "lessonId, text, files required" });
+    if (!resolved || typeof text !== "string" || !files) {
+      res.status(400).json({ error: "lessonId, text, files (path -> string) required" });
       return;
     }
     await sendMessage(deps, resolved.lesson, {

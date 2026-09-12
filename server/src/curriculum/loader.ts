@@ -170,6 +170,7 @@ export async function loadCurriculum(contentDir: string): Promise<Curriculum> {
           body: body.trim(),
           starterFiles,
           testFiles,
+          entry: meta.files[0].path,
         });
         const sol = await readDirFiles(path.join(lessonDir, "solution"));
         if (Object.keys(sol).length > 0) solutions.set(key, sol);
@@ -268,6 +269,7 @@ export async function loadCurriculum(contentDir: string): Promise<Curriculum> {
             body: stageBody.trim(),
             starterFiles: cumulative,
             testFiles: stageTests,
+            entry: pMeta.entry,
             stage: {
               projectKey: pKey,
               projectTitle: pMeta.title,

@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import initSqlJs from "sql.js";
 import type { Language, RunResult } from "@teacher/shared";
 import { extractTestEvents, formatSqlResults, runSqlProgram } from "@teacher/shared";
+import { withFileLock } from "../store/jsonStore.js";
 
 // Raw capture is generous so late __TEST__ events survive a chatty program;
 // the learner-visible output is trimmed to OUTPUT_CAP after event extraction.
@@ -366,8 +367,17 @@ export interface LocalRunOptions {
 
 export async function runLocal(dataDir: string, opts: LocalRunOptions): Promise<RunResult> {
   const timeoutMs = opts.timeoutMs ?? 10_000;
-  if (opts.language === "csharp") return runCsharp(dataDir, opts, timeoutMs);
-  if (opts.language === "rust") return runRust(dataDir, opts, timeoutMs);
+  if (opts.language === "csharp" || opts.language === "rust") {
+    // These two reuse a persistent per-lesson workspace. Two overlapping runs
+    // on one key — the learner's Run while the tutor's check_goal is in flight
+    // — would write into the same directory and each grade the other's
+    // program. Serialise on the workspace path; other runs are unaffected.
+    const kind = opts.language === "csharp" ? "cs-workspaces" : "rs-workspaces";
+    const lock = path.join(dataDir, kind, workspaceHash(opts));
+    return withFileLock(lock, () =>
+      opts.language === "csharp" ? runCsharp(dataDir, opts, timeoutMs) : runRust(dataDir, opts, timeoutMs),
+    );
+  }
   if (opts.language === "sql") return runSqlInProcess(opts, timeoutMs);
   const dir = await makeWorkspace(dataDir, opts.files);
   try {
@@ -442,9 +452,13 @@ const CSPROJ = `<Project Sdk="Microsoft.NET.Sdk">
 </Project>
 `;
 
-async function csWorkspace(dataDir: string, opts: LocalRunOptions): Promise<string> {
+function workspaceHash(opts: LocalRunOptions): string {
   const wsKey = opts.lessonKey ?? `adhoc/${opts.entry}`;
-  const dir = path.join(dataDir, "cs-workspaces", crypto.createHash("sha1").update(wsKey).digest("hex"));
+  return crypto.createHash("sha1").update(wsKey).digest("hex");
+}
+
+async function csWorkspace(dataDir: string, opts: LocalRunOptions): Promise<string> {
+  const dir = path.join(dataDir, "cs-workspaces", workspaceHash(opts));
   await fs.mkdir(dir, { recursive: true });
   const csproj = path.join(dir, "app.csproj");
   try {
@@ -519,8 +533,7 @@ async function runCsharp(dataDir: string, opts: LocalRunOptions, timeoutMs: numb
 // failure.
 
 async function rustWorkspace(dataDir: string, opts: LocalRunOptions): Promise<string> {
-  const wsKey = opts.lessonKey ?? `adhoc/${opts.entry}`;
-  const dir = path.join(dataDir, "rs-workspaces", crypto.createHash("sha1").update(wsKey).digest("hex"));
+  const dir = path.join(dataDir, "rs-workspaces", workspaceHash(opts));
   await fs.mkdir(dir, { recursive: true });
   // Drop stray sources from earlier runs — a leftover module file would let
   // `mod x;` silently resolve against stale code.

@@ -80,12 +80,25 @@ export async function recordAttempt(dataDir: string, lessonKey: string): Promise
   });
 }
 
-export async function completeLesson(dataDir: string, lessonKey: string): Promise<Progress> {
-  return mutateProgress(dataDir, (p) => {
+/**
+ * Marks a lesson (or project stage) done. `first` is decided inside the file
+ * lock: reading it beforehand let two overlapping completions both see "not
+ * yet done" and both write a journal entry.
+ */
+export async function completeLesson(
+  dataDir: string,
+  lessonKey: string,
+): Promise<{ progress: Progress; first: boolean }> {
+  let first = false;
+  const progress = await mutateProgress(dataDir, (p) => {
     const lp = (p.lessons[lessonKey] ??= { attempts: 0, timeSpentMin: 0 });
-    if (!lp.completedAt) lp.completedAt = new Date().toISOString();
+    if (!lp.completedAt) {
+      lp.completedAt = new Date().toISOString();
+      first = true;
+    }
     touchStreak(p);
   });
+  return { progress, first };
 }
 
 export async function recordChecks(dataDir: string, passed: number, failed: number): Promise<void> {

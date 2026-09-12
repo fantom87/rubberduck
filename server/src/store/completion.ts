@@ -1,5 +1,5 @@
 import type { Lesson } from "@teacher/shared";
-import { completeLesson, getProgress } from "./progress.js";
+import { completeLesson } from "./progress.js";
 import { appendJournal } from "./profile.js";
 
 /**
@@ -21,10 +21,8 @@ export async function recordCompletion(
   lesson: Lesson,
   summary?: string,
 ): Promise<void> {
-  const before = await getProgress(dataDir);
-  const firstCompletion = !before.lessons[key]?.completedAt;
-  await completeLesson(dataDir, key);
-  if (!firstCompletion) return;
+  const { first } = await completeLesson(dataDir, key);
+  if (!first) return;
 
   if (lesson.stage) {
     const isFinalStage = lesson.stage.stageIndex === lesson.stage.stageCount - 1;
