@@ -218,8 +218,9 @@ scripts/      content lint, bundling, packaging, icon and shortcut generation
 ## Checks
 
 ```bash
-npm test             # unit + integration (127)
-npm run lint-content # execute every lesson solution against its own checks
+npm test                        # unit + integration (134)
+npm run lint-content            # execute every lesson solution against its own checks
+npm run lint-content -- --all   # ...ignoring the cache of lessons that passed unchanged
 npm run typecheck -w web
 ```
 

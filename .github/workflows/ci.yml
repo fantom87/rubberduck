@@ -1,0 +1,41 @@
+# Every push and pull request: types, tests, and the content gate.
+#
+# The gate is the thing this repo promises — every lesson's reference solution
+# executes and passes that lesson's own checks. Until now it ran on one
+# developer's machine and never in CI. --strict turns a missing runtime from a
+# skip into a failure, so a runner image that lost dotnet can't fake a pass.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - run: npm ci --no-audit --no-fund
+
+      # Nothing else runs tsc: vite build doesn't type-check, and the shared
+      # interfaces have drifted from their zod schemas before, with a cast
+      # hiding it until someone happened to look.
+      - run: npx tsc --noEmit -p shared/tsconfig.json
+      - run: npx tsc --noEmit -p server/tsconfig.json
+      - run: npm run typecheck -w web
+
+      - run: npm test
+
+      - run: npm run lint-content -- --strict

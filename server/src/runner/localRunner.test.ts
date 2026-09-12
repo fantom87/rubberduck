@@ -81,7 +81,7 @@ describe("localRunner (python)", () => {
       language: "python",
       entry: "main.py",
       files: { "main.py": "while True:\n    pass\n" },
-      timeoutMs: 3000,
+      timeoutMs: 800,
     });
     expect(r.timedOut).toBe(true);
     expect(r.ok).toBe(false);
@@ -105,7 +105,7 @@ describe("localRunner (python)", () => {
       language: "python",
       entry: "main.py",
       files: { "main.py": program },
-      timeoutMs: 6000,
+      timeoutMs: 1500,
     });
     expect(r.timedOut).toBe(true);
     const pids = (r.stdout.match(/\d+/g) ?? []).map(Number);

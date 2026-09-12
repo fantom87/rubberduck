@@ -1,4 +1,3 @@
-import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   buildJsTestProgram,
@@ -206,12 +205,14 @@ describe("inlineStylesheets", () => {
 
 describe("JS test harness toEqual", () => {
   // Run the combined program the way the runners would, with console.log
-  // captured, then read the harness events back out of it.
+  // captured, then read the harness events back out of it. `new Function`
+  // rather than node:vm keeps this package free of Node types — shared code
+  // is imported by the browser too.
   function runHarness(userCode: string, testSource: string) {
     const nonce = "abc123";
     const lines: string[] = [];
     const program = buildJsTestProgram(userCode, testSource, nonce);
-    runInNewContext(program, { console: { log: (s: unknown) => lines.push(String(s)) } });
+    new Function("console", program)({ log: (s: unknown) => lines.push(String(s)) });
     return extractTestEvents(lines.join("\n"), nonce)[1];
   }
 
