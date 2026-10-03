@@ -1,7 +1,7 @@
 {
   "name": "rubberduck-app",
   "productName": "Rubberduck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Learn programming with an AI tutor",
   "author": "Bradley",
@@ -63,7 +63,9 @@
       }
     },
     "artifactName": "${productName} ${version}.${ext}",
-    "electronLanguages": ["en-US"]
+    "electronLanguages": [
+      "en-US"
+    ]
   },
   "devDependencies": {
     "electron": "^43.1.1",

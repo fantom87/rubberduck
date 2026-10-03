@@ -19,9 +19,9 @@ From the [Releases](../../releases/latest) page:
 
 | | Download | |
 |---|---|---|
-| **Windows** | `Rubberduck.1.0.0.zip` (135 MB) | Extract, run **Rubberduck.exe** inside |
-| | `Rubberduck.1.0.0.exe` (98 MB) | Installer, if you want Start Menu and desktop shortcuts |
-| **Linux** | `Rubberduck-1.0.0-x86_64.AppImage` (122 MB) | `chmod +x` it and run it |
+| **Windows** | `Rubberduck.1.1.0.zip` (135 MB) | Extract, run **Rubberduck.exe** inside |
+| | `Rubberduck.1.1.0.exe` (98 MB) | Installer, if you want Start Menu and desktop shortcuts |
+| **Linux** | `Rubberduck-1.1.0-x86_64.AppImage` (122 MB) | `chmod +x` it and run it |
 
 Ready in about five seconds. There is nothing to install — not even Node. The
 app carries its own runtime, its own server, all 357 lessons and the whole docs
@@ -156,8 +156,8 @@ npm run app:dist
 Builds the frontend, bundles the server to a single file, stages its dependency
 closure, then produces three things in `app/dist`:
 
-- **`Rubberduck 1.0.0.zip`** — the shareable one folder, exe inside.
-- **`Rubberduck 1.0.0.exe`** — a one-click installer with Start Menu
+- **`Rubberduck 1.1.0.zip`** — the shareable one folder, exe inside.
+- **`Rubberduck 1.1.0.exe`** — a one-click installer with Start Menu
   and desktop shortcuts, for a machine you actually use it on. It keeps your
   progress in the usual per-user location rather than beside the exe, because
   uninstalling (and upgrading, which uninstalls first) deletes the install
