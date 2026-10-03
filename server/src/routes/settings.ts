@@ -22,6 +22,7 @@ function repairSettings(raw: unknown): Settings {
       autocomplete: pick(shape.editor.shape.autocomplete, editorRaw.autocomplete, DEFAULT_SETTINGS.editor.autocomplete),
     },
     onboarded: pick(shape.onboarded, r.onboarded, DEFAULT_SETTINGS.onboarded),
+    weeklyGoal: pick(shape.weeklyGoal, r.weeklyGoal, DEFAULT_SETTINGS.weeklyGoal),
   };
   const layout = shape.layout.safeParse(r.layout);
   if (layout.success && layout.data) settings.layout = layout.data;

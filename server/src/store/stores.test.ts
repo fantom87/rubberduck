@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readJson, withFileLock, writeJson } from "./jsonStore.js";
-import { completeLesson, getProgress, recordActivity, recordAttempt } from "./progress.js";
+import { completeLesson, getProgress, recordActivity, recordAttempt, recordVisit } from "./progress.js";
 import { getSnapshot, listSnapshots, markSnapshotPassed, takeSnapshot } from "./snapshots.js";
 
 let dataDir: string;
@@ -64,19 +64,7 @@ describe("progress store", () => {
     const p = await getProgress(dataDir);
     expect(p.lessons["a/b/c"].attempts).toBe(10);
     expect(p.totals.runs).toBe(10);
-    expect(p.version).toBe(1);
-  });
-
-  it("reports a lapsed streak as 0 at read time (best kept)", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 0, 10, 12, 0, 0));
-    await completeLesson(dataDir, "a/b/c");
-    vi.setSystemTime(new Date(2026, 0, 11, 12, 0, 0));
-    expect((await getProgress(dataDir)).streak.current).toBe(1); // yesterday still counts
-    vi.setSystemTime(new Date(2026, 0, 20, 12, 0, 0));
-    const lapsed = await getProgress(dataDir);
-    expect(lapsed.streak.current).toBe(0);
-    expect(lapsed.streak.best).toBe(1);
+    expect(p.version).toBe(2);
   });
 
   it("reports the first completion once, from inside the lock", async () => {
@@ -87,41 +75,85 @@ describe("progress store", () => {
     expect((await completeLesson(dataDir, "a/b/c")).first).toBe(false);
   });
 
-  it("increments the streak across consecutive days", async () => {
+  it("counts a practice day on completion, and a gap never takes it back", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 2, 1, 20, 0, 0));
+    vi.setSystemTime(new Date(2026, 0, 10, 12, 0, 0));
     await completeLesson(dataDir, "a/b/c");
-    vi.setSystemTime(new Date(2026, 2, 2, 8, 0, 0));
-    await completeLesson(dataDir, "a/b/d");
-    expect((await getProgress(dataDir)).streak.current).toBe(2);
+    vi.setSystemTime(new Date(2026, 2, 20, 12, 0, 0)); // ten weeks later
+    expect((await getProgress(dataDir)).practiceDays).toEqual(["2026-01-10"]);
   });
 
-  it("credits the streak after 15 minutes of activity, without a completion", async () => {
+  it("counts a day after 10 minutes of activity, without a completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 1, 10, 0, 0));
-    for (let i = 0; i < 14; i++) await recordActivity(dataDir, 60, "a/b/c");
-    expect((await getProgress(dataDir)).streak.current).toBe(0);
+    for (let i = 0; i < 9; i++) await recordActivity(dataDir, 60, "a/b/c");
+    expect((await getProgress(dataDir)).practiceDays).toEqual([]);
     const p = await recordActivity(dataDir, 60, "a/b/c");
-    expect(p.streak.current).toBe(1);
-    expect(p.streak.lastActiveDate).toBe("2026-06-01");
-    expect(p.lessons["a/b/c"].timeSpentMin).toBe(15);
+    expect(p.practiceDays).toEqual(["2026-06-01"]);
+    expect(p.lessons["a/b/c"].timeSpentMin).toBe(10);
   });
 
-  it("resets the daily activity tally when the date changes", async () => {
+  it("counts a partial last tick, so a session that ends mid-minute still counts", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 1, 10, 0, 0));
+    for (let i = 0; i < 9; i++) await recordActivity(dataDir, 60, "a/b/c");
+    const p = await recordActivity(dataDir, 58, "a/b/c"); // flushed as the lesson closed
+    expect(p.practiceDays).toEqual(["2026-06-01"]);
+  });
+
+  it("resets today's tally when the date changes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 1, 23, 50, 0));
-    await recordActivity(dataDir, 600);
+    await recordActivity(dataDir, 300);
     vi.setSystemTime(new Date(2026, 5, 2, 0, 10, 0));
     const p = await recordActivity(dataDir, 60);
-    expect(p.streak.todayDate).toBe("2026-06-02");
-    expect(p.streak.todayMinutes).toBe(1);
+    expect(p.today).toEqual({ date: "2026-06-02", minutes: 1 });
+  });
+
+  it("remembers the lesson last opened or worked in, and never a playground", async () => {
+    await recordVisit(dataDir, "python/u/one");
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/one");
+    await recordAttempt(dataDir, "python/u/two");
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/two");
+    await recordAttempt(dataDir, "playground/python");
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/two");
+  });
+
+  it("migrates a version-1 file: completions and the last counted day become practice days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 3, 12, 0, 0));
+    const v1 = {
+      lessons: {
+        "python/u/a": { attempts: 1, timeSpentMin: 0, completedAt: new Date(2026, 7, 9, 14, 53).toISOString() },
+        "sql/u/b": { attempts: 1, timeSpentMin: 0, completedAt: new Date(2026, 7, 9, 15, 10).toISOString() },
+      },
+      streak: { current: 1, best: 1, lastActiveDate: "2026-08-12", todayDate: "2026-08-12", todayMinutes: 16 },
+      totals: { runs: 2, checksPassed: 5, checksFailed: 3 },
+      version: 1,
+    };
+    await fs.writeFile(path.join(dataDir, "progress.json"), JSON.stringify(v1), "utf8");
+    const p = await getProgress(dataDir);
+    expect(p.practiceDays).toEqual(["2026-08-09", "2026-08-12"]);
+    expect(p.today).toEqual({ date: "2026-08-12", minutes: 16 });
+    expect((p as unknown as Record<string, unknown>).streak).toBeUndefined();
+    expect(p.totals.runs).toBe(2);
+    // The next write persists the migrated shape as version 2.
+    const after = await recordAttempt(dataDir, "python/u/a");
+    expect(after.version).toBe(2);
+    expect(after.practiceDays).toEqual(["2026-08-09", "2026-08-12"]);
   });
 
   it("repairs a hand-edited progress.json instead of throwing", async () => {
-    await fs.writeFile(path.join(dataDir, "progress.json"), "{}", "utf8");
+    await fs.writeFile(
+      path.join(dataDir, "progress.json"),
+      JSON.stringify({ practiceDays: ["2026-01-01", "nonsense", 42, "2026-01-01"] }),
+      "utf8",
+    );
     const p = await getProgress(dataDir);
     expect(p.lessons).toEqual({});
     expect(p.totals.runs).toBe(0);
+    expect(p.practiceDays).toEqual(["2026-01-01"]);
+    expect(p.today).toEqual({ date: "", minutes: 0 });
   });
 });
 

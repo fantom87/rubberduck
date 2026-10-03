@@ -139,6 +139,7 @@ export const settingsSchema = z.object({
   layout: z.object({ paneSizes: z.array(z.number()) }).optional(),
   onboarded: z.boolean(),
   claudePath: z.string().max(500).optional(),
+  weeklyGoal: z.number().int().min(1).max(7).default(3),
 });
 
 export type LessonFrontmatter = z.infer<typeof lessonFrontmatterSchema>;

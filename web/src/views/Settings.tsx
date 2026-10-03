@@ -132,6 +132,24 @@ export default function Settings({ onSettingsChange }: { onSettingsChange: (s: S
       </section>
 
       <section>
+        <h2>Practice</h2>
+        <label className="setting-row">
+          Weekly goal
+          <select value={settings.weeklyGoal} onChange={(e) => save({ ...settings, weeklyGoal: Number(e.target.value) })}>
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+              <option key={n} value={n}>
+                {n} day{n === 1 ? "" : "s"} a week
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="dim small">
+          A day counts when you finish a lesson or spend 10 minutes on one. Each week you hit the goal keeps your streak
+          going, and a missed day on its own never resets it. Small is fine: a goal you hit beats a goal you dread.
+        </p>
+      </section>
+
+      <section>
         <h2>Tutor</h2>
         <label className="setting-row">
           Default assistance level

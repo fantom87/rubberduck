@@ -1,4 +1,4 @@
-import type { CheckResult, CheckSpec, Lesson, Progress, Settings, Tier, Language, RunnerKind, JournalEntry } from "@teacher/shared";
+import type { CheckResult, CheckSpec, Lesson, NextStep, ProgressWithPractice, Settings, Tier, Language, RunnerKind, JournalEntry } from "@teacher/shared";
 
 export interface LessonRow {
   id: string;
@@ -211,9 +211,13 @@ export const api = {
   /** The canonical end-of-stage workspace — the learner's way out of a corner. */
   stageSolution: (key: string) =>
     get<{ files: Record<string, string> }>(`/api/curriculum/stage-solution?id=${encodeURIComponent(key)}`),
-  progress: () => get<Progress>("/api/progress"),
+  progress: () => get<ProgressWithPractice>("/api/progress"),
+  /** The one thing to open next, for the Home page's big button. Null when everything is done. */
+  next: () => get<NextStep | null>("/api/next"),
   reportActivity: (seconds: number, lessonKey?: string) =>
     send("POST", "/api/progress/activity", { seconds, lessonKey }).then(() => undefined),
+  /** Opening a lesson makes it the one "pick up where you left off" returns to. */
+  visit: (lessonKey: string) => send("POST", "/api/progress/visit", { lessonKey }).then(() => undefined),
   resetProgress: () => send("POST", "/api/progress/reset", undefined, { "x-confirm": "reset" }).then(() => undefined),
   settings: () => get<Settings>("/api/settings"),
   saveSettings: (s: Settings) => send("PUT", "/api/settings", s).then(() => undefined),

@@ -146,6 +146,9 @@ export function tutorRoutes(contentDir: string, dataDir: string): Router {
       level: (Number(level) || 3) as AssistanceLevel,
       mode: resolved.mode,
       placementInfo: resolved.placementInfo,
+      // The canned first line the app showed as the tutor (web/src/opener.ts).
+      // Capped: it's a sentence or three, never a payload.
+      opener: typeof req.body?.opener === "string" ? (req.body.opener as string).slice(0, 1200) : undefined,
     });
     res.status(202).end();
   });

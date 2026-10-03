@@ -11,7 +11,7 @@ import { parseFiles } from "./files.js";
 // dots, colons, and backslashes can never become a path escape.
 const ID_RE = /^[a-z0-9][a-z0-9/_-]*$/i;
 
-function draftFile(dataDir: string, id: string): string {
+export function draftFile(dataDir: string, id: string): string {
   return path.join(dataDir, "drafts", `${id.replaceAll("/", "__")}.json`);
 }
 

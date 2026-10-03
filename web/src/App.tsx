@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Settings } from "@teacher/shared";
+import type { PracticeSummary, Settings } from "@teacher/shared";
 import Home from "./views/Home";
 import Track from "./views/Track";
 import LessonView from "./views/Lesson";
@@ -9,6 +9,9 @@ import Stats from "./views/Stats";
 import SettingsView from "./views/Settings";
 import Onboarding from "./views/Onboarding";
 import DocsDrawer from "./components/DocsDrawer";
+import SessionTimer from "./components/SessionTimer";
+import { endLessonActivity } from "./activity";
+import { practiceToast } from "./practice";
 import { CLAUDE_CODE_URL } from "./components/TutorChat";
 import { API_OFFLINE_EVENT, API_ONLINE_EVENT, api, tutorAvailability, type TutorState, type TrackView } from "./api/client";
 import { SettingsContext } from "./settingsContext";
@@ -26,6 +29,34 @@ function focusEditor() {
   document.querySelector<HTMLElement>(".cm-content")?.focus();
 }
 
+// ---------- the "just 10 minutes" session ----------
+
+const SESSION_MINUTES = 10;
+const SESSION_KEY = "session";
+// A session that ended while the app was closed still gets its "good place to
+// stop" moment if the app comes back soon after; much later, it's just gone.
+const SESSION_GRACE_MS = 30 * 60_000;
+
+function storedSession(): { endsAt: number } | null {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as { endsAt?: unknown } | null;
+    if (!s || typeof s.endsAt !== "number") return null;
+    if (Date.now() > s.endsAt + SESSION_GRACE_MS) return null;
+    return { endsAt: s.endsAt };
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(s: { endsAt: number } | null): void {
+  try {
+    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // storage unavailable — the session still runs for this visit
+  }
+}
+
 export default function App() {
   // localStorage is only the pre-fetch paint hint — settings.json is the
   // single source of truth for the theme (the topbar toggle PUTs it below).
@@ -39,8 +70,13 @@ export default function App() {
       return { view: "home" };
     }
   });
-  const [streak, setStreak] = useState(0);
-  const streakRef = useRef(0);
+  const [practice, setPractice] = useState<PracticeSummary | null>(null);
+  const practiceRef = useRef<PracticeSummary | null>(null);
+  const [session, setSession] = useState(storedSession);
+  const [sessionDone, setSessionDone] = useState(() => {
+    const s = storedSession();
+    return s !== null && Date.now() >= s.endsAt;
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDoc, setDrawerDoc] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -97,36 +133,69 @@ export default function App() {
     };
   }, []);
 
-  const refreshProgress = useCallback(() => {
-    api
-      .progress()
-      .then((p) => {
-        streakRef.current = p.streak.current;
-        setStreak(p.streak.current);
-      })
-      .catch(() => {});
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 5000);
   }, []);
 
-  useEffect(refreshProgress, [refreshProgress]);
+  /**
+   * Re-read the scoreboard. With `announce`, say what changed: a day that
+   * just counted, a weekly goal just met. `fallback` is said when nothing did.
+   */
+  const refreshPractice = useCallback(
+    (announce = false, fallback?: string) => {
+      api
+        .progress()
+        .then((p) => {
+          const prev = practiceRef.current;
+          const message = announce && prev ? practiceToast(prev, p.practice) : null;
+          if (message ?? fallback) showToast((message ?? fallback)!);
+          practiceRef.current = p.practice;
+          setPractice(p.practice);
+        })
+        .catch(() => {});
+    },
+    [showToast],
+  );
+
+  useEffect(() => refreshPractice(), [refreshPractice]);
 
   const celebrate = useCallback(() => {
-    api
-      .progress()
-      .then((p) => {
-        if (p.streak.current > streakRef.current) {
-          setToast(`🔥 ${p.streak.current}-day streak — keep it going!`);
-          window.clearTimeout(toastTimer.current);
-          toastTimer.current = window.setTimeout(() => setToast(null), 4000);
-        }
-        streakRef.current = p.streak.current;
-        setStreak(p.streak.current);
-      })
-      .catch(() => {});
+    refreshPractice(true);
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setConfetti(true);
       setTimeout(() => setConfetti(false), 1600);
     }
+  }, [refreshPractice]);
+
+  const startSession = useCallback(() => {
+    const s = { endsAt: Date.now() + SESSION_MINUTES * 60_000 };
+    saveSession(s);
+    setSession(s);
+    setSessionDone(false);
   }, []);
+
+  const clearSession = useCallback(() => {
+    saveSession(null);
+    setSession(null);
+    setSessionDone(false);
+  }, []);
+
+  const handleSessionDone = useCallback(() => setSessionDone(true), []);
+
+  /** "Stop here": the draft and the last partial minute are saved, then home. */
+  async function stopHere() {
+    clearSession();
+    await endLessonActivity();
+    setRoute({ view: "home" });
+    refreshPractice(true, "Saved. Nice work, that's ten minutes done.");
+  }
+
+  function keepGoing() {
+    clearSession();
+    refreshPractice(true);
+  }
 
   // Global shortcuts: Ctrl+D toggles docs (except inside the editor, where
   // CodeMirror's select-next-occurrence owns it), F1 opens docs, Alt+E jumps
@@ -178,6 +247,15 @@ export default function App() {
 
   const banners = (
     <>
+      {sessionDone && (
+        <div className="app-banner session-done" role="status">
+          <span>⏱ That's your {SESSION_MINUTES} minutes. A good place to stop, or keep going if you're in the flow.</span>
+          <button className="primary" onClick={() => void stopHere()}>
+            Stop here
+          </button>
+          <button onClick={keepGoing}>Keep going</button>
+        </div>
+      )}
       {offline && (
         <div className="app-banner" role="alert">
           <span>
@@ -283,10 +361,29 @@ export default function App() {
           {navBtn({ view: "docs" }, "Docs")}
           {navBtn({ view: "stats" }, "Stats")}
           <span className="spacer" />
-          {streak > 0 && (
-            <span className="streak-chip" title={`${streak}-day streak`}>
-              🔥 {streak}
+          {session && !sessionDone ? (
+            <SessionTimer endsAt={session.endsAt} onDone={handleSessionDone} onCancel={clearSession} />
+          ) : (
+            !sessionDone && (
+              <button className="session-start" title={`Start a ${SESSION_MINUTES}-minute session`} onClick={startSession}>
+                ⏱ {SESSION_MINUTES} min
+              </button>
+            )
+          )}
+          {practice && practice.weekStreak > 0 ? (
+            <span
+              className="streak-chip"
+              title={`${practice.weekStreak} week${practice.weekStreak === 1 ? "" : "s"} in a row with your goal of ${practice.weeklyGoal} days met`}
+            >
+              🔥 {practice.weekStreak}
             </span>
+          ) : (
+            practice &&
+            practice.daysThisWeek > 0 && (
+              <span className="streak-chip" title={`${practice.daysThisWeek} of ${practice.weeklyGoal} practice days this week`}>
+                📅 {practice.daysThisWeek}/{practice.weeklyGoal}
+              </span>
+            )
           )}
           <button aria-label="Open documentation drawer (Ctrl+D)" title="Docs drawer (Ctrl+D)" onClick={() => setDrawerOpen(true)}>
             📖
@@ -300,7 +397,15 @@ export default function App() {
         </header>
         {banners}
         <main className="main">
-          {route.view === "home" && <Home navigate={setRoute} />}
+          {route.view === "home" && (
+            <Home
+              navigate={setRoute}
+              onStartSession={(key) => {
+                startSession();
+                setRoute({ view: "lesson", key });
+              }}
+            />
+          )}
           {route.view === "track" && <Track trackId={route.trackId} navigate={setRoute} />}
           {route.view === "lesson" && (
             <LessonView
@@ -318,7 +423,14 @@ export default function App() {
             </div>
           )}
           {route.view === "stats" && <Stats />}
-          {route.view === "settings" && <SettingsView onSettingsChange={applySettings} />}
+          {route.view === "settings" && (
+            <SettingsView
+              onSettingsChange={(s) => {
+                applySettings(s);
+                refreshPractice(); // the weekly goal may have changed
+              }}
+            />
+          )}
         </main>
         <DocsDrawer open={drawerOpen} initial={drawerDoc} onClose={() => setDrawerOpen(false)} />
         {toast && (

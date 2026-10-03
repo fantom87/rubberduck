@@ -1,20 +1,17 @@
 import path from "node:path";
 import type { Progress } from "@teacher/shared";
 import { readJson, withFileLock, writeJsonInLock } from "./jsonStore.js";
-
-// A day keeps the streak alive if the learner completes a lesson OR racks up
-// at least this many minutes of active lesson time (fed by the activity
-// heartbeat from the Lesson view).
-const STREAK_ACTIVITY_MINUTES = 15;
+import { PRACTICE_MINUTES, isDateString, localDateString, markPracticeDay } from "./practice.js";
 
 function emptyProgress(): Progress {
   // Fresh object every call — read-modify-write mutates the value readJson
   // returns, and a shared constant would leak state between calls.
   return {
     lessons: {},
-    streak: { current: 0, best: 0, lastActiveDate: "" },
+    practiceDays: [],
+    today: { date: "", minutes: 0 },
     totals: { runs: 0, checksPassed: 0, checksFailed: 0 },
-    version: 1,
+    version: 2,
   };
 }
 
@@ -22,36 +19,50 @@ function progressFile(dataDir: string): string {
   return path.join(dataDir, "progress.json");
 }
 
-function localDateString(d = new Date()): string {
-  // Local calendar date, not UTC — streaks follow the user's clock.
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** Playground and placement keys ride the same routes but aren't lessons;
+ *  "pick up where you left off" must never point at them. */
+function isLessonKey(key: string): boolean {
+  return !/^(playground|placement)[/-]/.test(key);
 }
 
-function yesterdayString(): string {
-  // Calendar arithmetic, not "now minus 24h" — DST days aren't 24 hours long.
-  const now = new Date();
-  return localDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+function touchLastActive(p: Progress, key: string): void {
+  if (isLessonKey(key)) p.lastActive = { key, at: new Date().toISOString() };
 }
 
-function touchStreak(p: Progress): void {
-  const today = localDateString();
-  if (p.streak.lastActiveDate === today) return;
-  p.streak.current = p.streak.lastActiveDate === yesterdayString() ? p.streak.current + 1 : 1;
-  p.streak.best = Math.max(p.streak.best, p.streak.current);
-  p.streak.lastActiveDate = today;
+/**
+ * Version 1 kept a daily streak: current/best, the last day that counted, and
+ * today's minute tally. Version 2 keeps the list of practice days instead. The
+ * old file only remembers the LAST counted day, so the migration rebuilds the
+ * list from every completion date plus that one. Days that counted through
+ * minutes alone, before the last one, are gone — the old format never stored
+ * them.
+ */
+function migrate(raw: Record<string, unknown>, p: Progress): void {
+  const old = (raw.streak ?? {}) as { lastActiveDate?: unknown; todayDate?: unknown; todayMinutes?: unknown };
+  if (!Array.isArray(p.practiceDays)) {
+    const days: string[] = [];
+    for (const lp of Object.values(p.lessons)) {
+      if (lp?.completedAt) markPracticeDay(days, localDateString(new Date(lp.completedAt)));
+    }
+    if (isDateString(old.lastActiveDate)) markPracticeDay(days, old.lastActiveDate);
+    p.practiceDays = days;
+  }
+  p.practiceDays = [...new Set(p.practiceDays.filter(isDateString))].sort();
+  if (!p.today || !isDateString(p.today.date) || typeof p.today.minutes !== "number") {
+    p.today = isDateString(old.todayDate)
+      ? { date: old.todayDate, minutes: typeof old.todayMinutes === "number" ? old.todayMinutes : 0 }
+      : { date: "", minutes: 0 };
+  }
+  delete (p as unknown as Record<string, unknown>).streak;
 }
 
 async function readProgress(dataDir: string): Promise<Progress> {
-  const p = await readJson(progressFile(dataDir), emptyProgress());
+  const raw = await readJson<Record<string, unknown>>(progressFile(dataDir), emptyProgress() as unknown as Record<string, unknown>);
+  const p = raw as unknown as Progress;
   // Minimal shape repair — a hand-edited file must never 500 the routes.
   p.lessons ??= {};
-  p.streak ??= { current: 0, best: 0, lastActiveDate: "" };
   p.totals ??= { runs: 0, checksPassed: 0, checksFailed: 0 };
-  // A lapsed streak is over now, not at the next completion: if the last
-  // active day is neither today nor yesterday, the current run is 0.
-  if (p.streak.lastActiveDate !== localDateString() && p.streak.lastActiveDate !== yesterdayString()) {
-    p.streak.current = 0;
-  }
+  migrate(raw, p);
   return p;
 }
 
@@ -62,7 +73,7 @@ async function mutateProgress(dataDir: string, mutate: (p: Progress) => void): P
   return withFileLock(file, async () => {
     const p = await readProgress(dataDir);
     mutate(p);
-    p.version = 1;
+    p.version = 2;
     await writeJsonInLock(file, p);
     return p;
   });
@@ -77,7 +88,14 @@ export async function recordAttempt(dataDir: string, lessonKey: string): Promise
     const lp = (p.lessons[lessonKey] ??= { attempts: 0, timeSpentMin: 0 });
     lp.attempts += 1;
     p.totals.runs += 1;
+    touchLastActive(p, lessonKey);
   });
+}
+
+/** Opening a lesson is enough to make it the one "pick up where you left off"
+ *  returns to — nothing has to be run or typed first. */
+export async function recordVisit(dataDir: string, lessonKey: string): Promise<Progress> {
+  return mutateProgress(dataDir, (p) => touchLastActive(p, lessonKey));
 }
 
 /**
@@ -96,7 +114,8 @@ export async function completeLesson(
       lp.completedAt = new Date().toISOString();
       first = true;
     }
-    touchStreak(p);
+    markPracticeDay(p.practiceDays, localDateString());
+    touchLastActive(p, lessonKey);
   });
   return { progress, first };
 }
@@ -109,21 +128,21 @@ export async function recordChecks(dataDir: string, passed: number, failed: numb
 }
 
 /** Activity heartbeat: accumulate active time into today's tally (and the
- *  lesson's timeSpentMin), and keep the streak alive once today crosses the
- *  ≥15-minute activity threshold — completing a lesson isn't the only way. */
+ *  lesson's timeSpentMin), and count the day once the tally reaches
+ *  PRACTICE_MINUTES — completing a lesson isn't the only way a day counts. */
 export async function recordActivity(dataDir: string, seconds: number, lessonKey?: string): Promise<Progress> {
   return mutateProgress(dataDir, (p) => {
     const today = localDateString();
-    if (p.streak.todayDate !== today) {
-      p.streak.todayDate = today;
-      p.streak.todayMinutes = 0;
-    }
+    if (p.today.date !== today) p.today = { date: today, minutes: 0 };
     const minutes = seconds / 60;
-    p.streak.todayMinutes = (p.streak.todayMinutes ?? 0) + minutes;
+    p.today.minutes += minutes;
     if (lessonKey) {
       const lp = (p.lessons[lessonKey] ??= { attempts: 0, timeSpentMin: 0 });
       lp.timeSpentMin += minutes;
+      touchLastActive(p, lessonKey);
     }
-    if (p.streak.todayMinutes >= STREAK_ACTIVITY_MINUTES) touchStreak(p);
+    // A hair under the threshold still counts: heartbeats are whole minutes
+    // measured by a browser timer, and 9.99 minutes is ten.
+    if (p.today.minutes >= PRACTICE_MINUTES - 0.05) markPracticeDay(p.practiceDays, today);
   });
 }

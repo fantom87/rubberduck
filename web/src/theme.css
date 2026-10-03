@@ -401,7 +401,8 @@ button.primary {
   gap: 8px;
 }
 
-.track-card h2 {
+.track-card h2,
+.track-card h3 {
   margin: 0;
   font-size: 18px;
 }
@@ -1641,4 +1642,212 @@ textarea.chat-input {
   width: 100%;
   font-size: 13px;
   color: var(--text-dim);
+}
+
+/* ---------- Home: one thing to do next ---------- */
+
+.welcome-line {
+  font-size: 16px;
+  margin: -4px 0 16px;
+}
+
+.next-card {
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 18px 22px;
+  margin: 0 0 14px;
+}
+
+.next-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.next-title {
+  font-size: 22px;
+  margin: 4px 0 2px;
+}
+
+.next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.next-go {
+  font-size: 17px;
+  padding: 10px 26px;
+}
+
+.next-quick {
+  font-size: 15px;
+  padding: 10px 18px;
+}
+
+.practice-line {
+  margin: 0 0 28px;
+  color: var(--text-dim);
+}
+
+.tracks-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+}
+
+.coming-later {
+  margin-top: 14px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+}
+
+/* ---------- The 10-minute session ---------- */
+
+.session-start {
+  font-size: 13px;
+  padding: 3px 10px;
+  color: var(--text-dim);
+}
+
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 4px 2px 12px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-cancel {
+  border: none;
+  background: none;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Not a warning: the accent border, not the amber one. */
+.app-banner.session-done {
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- Focus mode: goal, checks, editor, output ---------- */
+
+.lesson-layout.focus .pane-lesson,
+.lesson-layout.focus .pane-tutor,
+.lesson-layout.focus .pane-divider {
+  display: none;
+}
+
+.lesson-layout.focus .pane-work {
+  flex: 1 1 100%;
+}
+
+.focus-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.focus-goal {
+  flex: 1 1 320px;
+  font-size: 15px;
+}
+
+.focus-goal .label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-right: 6px;
+}
+
+.focus-bar .next-lesson-btn {
+  margin: 0;
+}
+
+.focus-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.goal-checklist.compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.goal-checklist.compact ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+}
+
+.goal-checklist.compact .checks-tally {
+  margin: 0;
+}
+
+/* ---------- A small win per check ---------- */
+
+.checks-tally {
+  margin: 0 0 8px;
+}
+
+@keyframes tick-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes tick-glow {
+  from {
+    background: color-mix(in srgb, var(--success) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.goal-item.just-passed {
+  border-radius: 6px;
+  animation: tick-glow 0.9s ease-out;
+}
+
+.goal-item.just-passed .check-icon {
+  display: inline-block;
+  animation: tick-pop 0.45s ease-out;
+}
+
+/* ---------- The tutor's opening line ---------- */
+
+.chat-msg.assistant.opener {
+  border-left: 3px solid var(--accent);
 }

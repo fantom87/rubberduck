@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { JournalEntry, Progress, Tier } from "@teacher/shared";
+import type { JournalEntry, ProgressWithPractice, Tier } from "@teacher/shared";
 import { api, type TrackView } from "../api/client";
 import { completionCounts } from "../counts";
+import { weekPart } from "../practice";
 
 const TIER_ORDER: Tier[] = ["foundations", "core", "intermediate", "advanced", "refresher", "custom"];
 
@@ -19,7 +20,7 @@ function tierRollup(track: TrackView): Map<Tier, { done: number; total: number }
 }
 
 export default function Stats() {
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [progress, setProgress] = useState<ProgressWithPractice | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [tracks, setTracks] = useState<TrackView[]>([]);
   const [error, setError] = useState(false);
@@ -47,6 +48,7 @@ export default function Stats() {
   if (!progress) return <div className="view-pad">Loading…</div>;
 
   const counts = completionCounts(tracks);
+  const practice = progress.practice;
 
   return (
     <div className="view-pad">
@@ -57,8 +59,22 @@ export default function Stats() {
           <div className="dim small">lessons completed</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">🔥 {progress.streak.current}</div>
-          <div className="dim small">day streak (best: {progress.streak.best})</div>
+          <div className="stat-value">{practice.totalDays}</div>
+          <div className="dim small">days practiced, all time</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{practice.weekStreak > 0 ? `🔥 ${practice.weekStreak}` : "–"}</div>
+          <div className="dim small">
+            weeks in a row with your goal met
+            {practice.bestWeekStreak > 0 ? ` (best: ${practice.bestWeekStreak})` : ""}
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">
+            {practice.daysThisWeek}
+            <span className="dim">/{practice.weeklyGoal}</span>
+          </div>
+          <div className="dim small">{weekPart(practice)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{progress.totals.runs}</div>

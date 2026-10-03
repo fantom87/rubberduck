@@ -30,6 +30,9 @@ interface Props {
   tutorAvailable?: boolean;
   /** which kind of unreachable — the two have different fixes. */
   tutorState?: TutorState;
+  /** A first line from the tutor, written from the lesson (see opener.ts), so
+   *  the learner never faces an empty chat at the high assistance levels. */
+  opener?: string | null;
 }
 
 /**
@@ -69,6 +72,7 @@ export default function TutorChat({
   onPendingConsumed,
   tutorAvailable,
   tutorState,
+  opener,
 }: Props) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [input, setInput] = useState("");
@@ -81,6 +85,8 @@ export default function TutorChat({
   const watchdogRef = useRef<number | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const itemsRef = useRef<ChatItem[]>(items);
+  itemsRef.current = items;
 
   function clearWatchdog() {
     if (watchdogRef.current !== undefined) {
@@ -181,6 +187,11 @@ export default function TutorChat({
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busyRef.current) return;
+    // On the first message of a conversation, tell the real tutor what the
+    // opener already said on its behalf, so it carries on from there instead
+    // of greeting the learner a second time. Read before this message joins
+    // the transcript.
+    const openerShown = itemsRef.current.length === 0 && opener ? opener : undefined;
     setCanRetry(false);
     lastSentRef.current = trimmed;
     setItems((prev) => [...prev, { role: "user", text: trimmed }]);
@@ -193,7 +204,14 @@ export default function TutorChat({
       const res = await fetch("/api/tutor/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lessonId: lessonKey, text: trimmed, files: ctx.files, lastRun: ctx.lastRun, level }),
+        body: JSON.stringify({
+          lessonId: lessonKey,
+          text: trimmed,
+          files: ctx.files,
+          lastRun: ctx.lastRun,
+          level,
+          ...(openerShown ? { opener: openerShown } : {}),
+        }),
       });
       if (!res.ok) {
         let message = `The tutor couldn't take that message (HTTP ${res.status}).`;
@@ -302,6 +320,14 @@ export default function TutorChat({
               restart the app.
             </p>
           )}
+          {opener && (
+            <>
+              <div className="transcript-label">Getting started</div>
+              <div className="chat-msg assistant opener">
+                <AssistantMessage text={opener} />
+              </div>
+            </>
+          )}
           <div className="transcript-label">Recorded example — a real session, not live</div>
           {SAMPLE_TRANSCRIPT.map((block, bi) => (
             <div key={bi} className="transcript-block">
@@ -342,10 +368,16 @@ export default function TutorChat({
         </button>
       </div>
       <div className="chat-scroll" ref={scrollRef} onScroll={handleScroll} aria-live="polite">
-        {items.length === 0 && (
-          <p className="dim small chat-empty">
-            Ask the tutor anything about this lesson — or just say hello. Slide the assistance level to change how much help you get.
-          </p>
+        {opener ? (
+          <div className="chat-msg assistant opener">
+            <AssistantMessage text={opener} />
+          </div>
+        ) : (
+          items.length === 0 && (
+            <p className="dim small chat-empty">
+              Ask the tutor anything about this lesson — or just say hello. Slide the assistance level to change how much help you get.
+            </p>
+          )
         )}
         {items.map((item, i) =>
           item.role === "chip" ? (

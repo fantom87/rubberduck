@@ -589,6 +589,8 @@ export async function sendMessage(
     level: AssistanceLevel;
     mode?: SessionMode;
     placementInfo?: PlacementInfo;
+    /** the app's canned opening line, shown as the tutor before this first message */
+    opener?: string;
   },
 ): Promise<void> {
   const key = `${lesson.trackId}/${lesson.unitId}/${lesson.id}`;
@@ -648,6 +650,7 @@ export async function sendMessage(
           title: session.lesson.title,
         }
       : null,
+    opener: opts.opener,
   });
   session.levelChanged = false;
   session.queue.push({ wrapped });

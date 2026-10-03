@@ -191,17 +191,59 @@ export interface LessonProgress {
 
 export interface Progress {
   lessons: Record<string, LessonProgress>;
-  streak: {
-    current: number;
-    best: number;
-    lastActiveDate: string;
-    /** rolling activity tally for the ≥15-minute streak rule */
-    todayDate?: string;
-    todayMinutes?: number;
-  };
+  /**
+   * Local calendar dates (YYYY-MM-DD, sorted, unique) that counted as practice:
+   * a lesson completed, or enough active minutes that day. It only grows. The
+   * weekly streak and every total are computed from it, so nothing stored here
+   * can go down.
+   */
+  practiceDays: string[];
+  /** today's running activity tally toward the minutes rule */
+  today: { date: string; minutes: number };
+  /** the lesson most recently opened, run, or worked in; "pick up" goes here */
+  lastActive?: { key: string; at: string };
   totals: { runs: number; checksPassed: number; checksFailed: number };
-  /** persisted-data schema version for future migrations */
+  /** persisted-data schema version; 2 replaced the daily streak with practiceDays */
   version?: number;
+}
+
+/**
+ * The scoreboard, computed from Progress.practiceDays and the weekly goal.
+ *
+ * Built on weeks, not days. A daily streak resets to zero after one missed
+ * day, and a reset score is a reason to stop. Here a week where the goal is
+ * met keeps the streak, and the week in progress never breaks it.
+ */
+export interface PracticeSummary {
+  weeklyGoal: number;
+  daysThisWeek: number;
+  goalMetThisWeek: boolean;
+  /** consecutive weeks with the goal met, ending this week or last */
+  weekStreak: number;
+  bestWeekStreak: number;
+  totalDays: number;
+  lastPracticeDate: string | null;
+  /** whole calendar days since the last practice day; null if never */
+  daysSinceLast: number | null;
+}
+
+export type ProgressWithPractice = Progress & { practice: PracticeSummary };
+
+/** What the Home page's one big button opens. */
+export interface NextStep {
+  /** resume: unfinished work · next: the one after something finished · start: nothing done yet */
+  kind: "resume" | "next" | "start";
+  key: string;
+  title: string;
+  trackId: string;
+  trackTitle: string;
+  estMinutes: number;
+  /** set when this is a project stage */
+  projectTitle?: string;
+  /** the learner has saved code for this one */
+  hasDraft: boolean;
+  /** what they touched last, for the welcome-back line */
+  last: { key: string; title: string; completed: boolean } | null;
 }
 
 export interface Settings {
@@ -214,6 +256,8 @@ export interface Settings {
   /** Absolute path to the learner's own Claude Code, for installs the
    *  automatic lookup can't find. Empty/absent means "go and find it". */
   claudePath?: string;
+  /** days of practice a week that keep the weekly streak going (1–7) */
+  weeklyGoal: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -222,6 +266,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tutorModel: "claude-fable-5",
   editor: { fontSize: 14, autocomplete: true },
   onboarded: false,
+  weeklyGoal: 3,
 };
 
 export interface JournalEntry {

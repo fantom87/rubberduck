@@ -1,6 +1,10 @@
+import fs from "node:fs/promises";
 import { Router } from "express";
+import type { NextStep } from "@teacher/shared";
 import { getCurriculum, reloadCurriculum } from "../curriculum/loader.js";
+import { computeNextStep } from "../curriculum/next.js";
 import { getProgress } from "../store/progress.js";
+import { draftFile } from "./drafts.js";
 
 export function curriculumRoutes(contentDir: string, dataDir: string): Router {
   const r = Router();
@@ -50,6 +54,27 @@ export function curriculumRoutes(contentDir: string, dataDir: string): Router {
       })),
     }));
     res.json({ tracks, errors: cur.errors });
+  });
+
+  // The one thing to open next — the Home page's big button. Server-side, so
+  // it survives a cleared browser profile (the old Continue button lived in
+  // localStorage and vanished whenever the app's origin changed).
+  r.get("/api/next", async (_req, res) => {
+    const cur = await getCurriculum(contentDir);
+    const progress = await getProgress(dataDir);
+    const step = computeNextStep(cur, progress);
+    if (!step) {
+      res.json(null);
+      return;
+    }
+    const lesson = cur.lessons.get(step.key)!;
+    const draftId = lesson.stage?.projectKey ?? step.key;
+    const hasDraft = await fs.access(draftFile(dataDir, draftId)).then(
+      () => true,
+      () => false,
+    );
+    const payload: NextStep = { ...step, hasDraft };
+    res.json(payload);
   });
 
   // Full lesson content (frontmatter + body + starter files). No solutions, ever.

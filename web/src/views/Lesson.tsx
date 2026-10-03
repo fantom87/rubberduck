@@ -16,7 +16,21 @@ import type { ProjectContext } from "../api/client";
 import { useTutorStatus } from "../api/useTutorStatus";
 import { useSettings } from "../settingsContext";
 import { renderMarkdown } from "../md";
+import { beginLessonActivity, endLessonActivity } from "../activity";
+import { buildOpener } from "../opener";
 import type { Route } from "../App";
+
+// ---------- focus mode (remembered across lessons) ----------
+
+const FOCUS_KEY = "focusMode";
+
+function storedFocus(): boolean {
+  try {
+    return localStorage.getItem(FOCUS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 interface Props {
   lessonKey: string;
@@ -117,6 +131,9 @@ export function tabListKeyDown(
 
 export default function LessonView({ lessonKey, theme, navigate, onProgressChange, onOpenDoc }: Props) {
   const settings = useSettings();
+  // Read inside the load effect, which runs per lesson, not per settings change.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState("");
@@ -158,6 +175,32 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
   const draftKeyRef = useRef(lessonKey);
   const paneSizesRef = useRef(paneSizes);
   paneSizesRef.current = paneSizes;
+  // Focus mode hides the lesson text and the tutor, leaving the goal, the
+  // checks, the editor and the output. Fewer things on screen asking for a
+  // look.
+  const [focus, setFocus] = useState(storedFocus);
+  const toggleFocus = useCallback(() => {
+    setFocus((f) => {
+      try {
+        localStorage.setItem(FOCUS_KEY, f ? "0" : "1");
+      } catch {
+        // storage unavailable — the toggle still works for this visit
+      }
+      return !f;
+    });
+  }, []);
+  useEffect(() => {
+    // Ctrl+Shift+F. Not Alt+F: the desktop shell keeps Electron's menu, and
+    // Alt+F opens its File menu.
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        toggleFocus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleFocus]);
   // Parsed once per lesson, not once per keystroke: renderMarkdown runs
   // marked, Lezer highlighting and DOMPurify (1–8 ms a call), and this
   // component re-renders on every editor change.
@@ -166,6 +209,7 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
   // re-render the whole transcript there.
   const getTutorContext = useCallback(() => ({ files: filesRef.current, lastRun: resultRef.current }), []);
   const clearPendingTutorMsg = useCallback(() => setPendingTutorMsg(null), []);
+  const opener = useMemo(() => (lesson ? buildOpener(lesson, level) : null), [lesson, level]);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,25 +233,23 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
         const initial = draft.files ?? l.starterFiles;
         setFiles(initial);
         setActiveFile(l.files[0]?.path ?? "");
-        localStorage.setItem("lastLessonKey", lessonKey);
-        localStorage.setItem("lastLessonTitle", l.title);
+        // Opening it is enough to make this the lesson Home offers to pick up.
+        api.visit(lessonKey).catch(() => {});
         if (l.language === "html-css") setPreview(buildSrcdoc(initial));
         if (l.language === "python" && l.runner === "browser") {
           warmPyodide();
           if (!isPyodideWarm()) setNotice("Loading Python (one-time, ~13 MB)…");
         }
         if (l.language === "sql" && l.runner === "browser") warmSqlJs();
-        const [progress, freshSettings] = await Promise.all([
-          api.progress(),
-          api.settings().catch(() => null),
-        ]);
-        if (!cancelled) {
-          setCompleted(Boolean(progress.lessons[lessonKey]?.completedAt));
-          const lvl = storedAssistLevel(lessonKey) ?? ((freshSettings?.assistanceDefault ?? 3) as AssistanceLevel);
-          setLevel(lvl);
-          // Hand-holder/Instructor learners get the first baked hint up front.
-          if (lvl >= 4 && (l.hints?.length ?? 0) > 0) setRevealedHints([0]);
-        }
+        // The level comes from settings the app already holds, set in the same
+        // render as the lesson. Fetching them again left the slider on the
+        // wrong level, and the tutor's opener missing, for a second or two.
+        const lvl = storedAssistLevel(lessonKey) ?? (settingsRef.current.assistanceDefault as AssistanceLevel);
+        setLevel(lvl);
+        // Hand-holder/Instructor learners get the first baked hint up front.
+        if (lvl >= 4 && (l.hints?.length ?? 0) > 0) setRevealedHints([0]);
+        const progress = await api.progress();
+        if (!cancelled) setCompleted(Boolean(progress.lessons[lessonKey]?.completedAt));
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
@@ -228,15 +270,13 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
     };
   }, [lessonKey]);
 
-  // Activity heartbeat: a minute of visible lesson time at a time. Feeds the
-  // ≥15-minutes-a-day streak rule and per-lesson time-spent.
+  // Active time on this lesson: feeds per-lesson time spent and the
+  // ten-minutes-counts-as-a-day rule. See activity.ts.
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        api.reportActivity(60, lessonKey).catch(() => {});
-      }
-    }, 60_000);
-    return () => clearInterval(timer);
+    beginLessonActivity(lessonKey);
+    return () => {
+      void endLessonActivity();
+    };
   }, [lessonKey]);
 
   const scheduleSave = useCallback(() => {
@@ -453,9 +493,24 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
   const hintsAvailable = (lesson.hints?.length ?? 0) > 0 && level >= 2;
   const hintsLeft = (lesson.hints?.length ?? 0) - revealedHints.length;
 
+  // Shown in the lesson pane, and in the focus bar when the pane is hidden.
+  const nextButton = !completed ? null : lesson.nextLessonKey ? (
+    <button className="primary next-lesson-btn" onClick={() => navigate({ view: "lesson", key: lesson.nextLessonKey! })}>
+      {project ? "Next stage →" : "Next lesson →"}
+    </button>
+  ) : project ? (
+    <button className="next-lesson-btn" onClick={() => navigate({ view: "track", trackId: lesson.trackId })}>
+      🎉 You built {project.title} — back to the track
+    </button>
+  ) : (
+    <button className="next-lesson-btn" onClick={() => navigate({ view: "track", trackId: lesson.trackId })}>
+      🎉 You've finished every lesson here so far — back to the track
+    </button>
+  );
+
   return (
     <div
-      className="lesson-layout"
+      className={`lesson-layout${focus ? " focus" : ""}`}
       ref={layoutRef}
       style={
         {
@@ -516,23 +571,7 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
             I'm stuck — use the reference for this stage
           </button>
         )}
-        {completed &&
-          (lesson.nextLessonKey ? (
-            <button
-              className="primary next-lesson-btn"
-              onClick={() => navigate({ view: "lesson", key: lesson.nextLessonKey! })}
-            >
-              {project ? "Next stage →" : "Next lesson →"}
-            </button>
-          ) : project ? (
-            <button className="next-lesson-btn" onClick={() => navigate({ view: "track", trackId: lesson.trackId })}>
-              🎉 You built {project.title} — back to the track
-            </button>
-          ) : (
-            <button className="next-lesson-btn" onClick={() => navigate({ view: "track", trackId: lesson.trackId })}>
-              🎉 You've finished every lesson here so far — back to the track
-            </button>
-          ))}
+        {nextButton}
         {revealedHints.length > 0 && (
           <div className="hints-box">
             <div className="label">Hints</div>
@@ -554,6 +593,22 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
       {paneDivider(0, "Resize lesson pane")}
 
       <section className="pane pane-work" aria-label="Code workspace">
+        {focus && (
+          <div className="focus-bar" aria-label="Goal">
+            <div className="focus-goal">
+              <span className="label">Goal</span> {lesson.goal}
+            </div>
+            <GoalChecklist
+              compact
+              checks={lesson.checks}
+              results={checkResults}
+              previews={previewChecks}
+              checking={checking}
+              onCheck={handleCheck}
+            />
+            {nextButton}
+          </div>
+        )}
         {lesson.files.length > 1 && (
           <div className="file-tabs" role="tablist" aria-label="Lesson files">
             {lesson.files.map((f, i) => (
@@ -585,6 +640,14 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
               <>
                 <HistoryMenu lessonKey={lessonKey} onRestore={handleRestore} />
                 <button onClick={() => handleRestore(lesson.starterFiles)}>Reset</button>
+                <button
+                  className="focus-toggle"
+                  aria-pressed={focus}
+                  title="Focus mode: just the goal, the editor and the output (Ctrl+Shift+F)"
+                  onClick={toggleFocus}
+                >
+                  {focus ? "◱ Show all" : "◳ Focus"}
+                </button>
               </>
             }
           />
@@ -614,6 +677,7 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
           onPendingConsumed={clearPendingTutorMsg}
           tutorAvailable={tutorAvailable}
           tutorState={tutorState}
+          opener={opener}
         />
       </section>
     </div>
