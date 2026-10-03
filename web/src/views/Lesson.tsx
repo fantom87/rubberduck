@@ -179,6 +179,20 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
   // checks, the editor and the output. Fewer things on screen asking for a
   // look.
   const [focus, setFocus] = useState(storedFocus);
+  const focusToggleRef = useRef<HTMLButtonElement>(null);
+  const leaveFocus = useCallback(() => {
+    setFocus(false);
+    try {
+      localStorage.setItem(FOCUS_KEY, "0");
+    } catch {
+      // storage unavailable
+    }
+  }, []);
+  // Hiding a pane that holds keyboard focus would strand it on an invisible
+  // element. Hand it to the toggle that just hid the pane.
+  useEffect(() => {
+    if (focus && document.activeElement?.closest(".pane-lesson, .pane-tutor")) focusToggleRef.current?.focus();
+  }, [focus]);
   const toggleFocus = useCallback(() => {
     setFocus((f) => {
       try {
@@ -230,6 +244,11 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
         if (cancelled) return;
         setLesson(l);
         setProject(l.project ?? null);
+        // A lesson never worked on opens with everything showing, even if
+        // focus mode was on: the teaching text, hints and the tutor's opener
+        // are how a new lesson starts. Not saved, so a lesson with work in
+        // it still opens however it was left.
+        if (!draft.files) setFocus(false);
         const initial = draft.files ?? l.starterFiles;
         setFiles(initial);
         setActiveFile(l.files[0]?.path ?? "");
@@ -641,7 +660,9 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
                 <HistoryMenu lessonKey={lessonKey} onRestore={handleRestore} />
                 <button onClick={() => handleRestore(lesson.starterFiles)}>Reset</button>
                 <button
+                  ref={focusToggleRef}
                   className="focus-toggle"
+                  aria-label="Focus mode"
                   aria-pressed={focus}
                   title="Focus mode: just the goal, the editor and the output (Ctrl+Shift+F)"
                   onClick={toggleFocus}
@@ -658,9 +679,11 @@ export default function LessonView({ lessonKey, theme, navigate, onProgressChang
           notice={notice}
           language={lesson.language}
           tutorAvailable={tutorAvailable}
-          onExplainError={() =>
-            setPendingTutorMsg("Please explain this error to me in plain language — what it means and where to look. Don't solve the rest of the lesson for me.")
-          }
+          onExplainError={() => {
+            // The answer streams into the tutor pane, so it has to be showing.
+            if (focus) leaveFocus();
+            setPendingTutorMsg("Please explain this error to me in plain language — what it means and where to look. Don't solve the rest of the lesson for me.");
+          }}
         />
       </section>
 

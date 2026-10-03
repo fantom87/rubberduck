@@ -12,6 +12,10 @@ export function trackSequence(cur: Curriculum, trackId: string): string[] {
   if (!track) return [];
   const out: string[] = [];
   for (const unit of track.units) {
+    // Custom lessons are side trips the learner asked for, appended as the
+    // last unit. They're not the road: finishing one must lead back to where
+    // the learner was in the track, not to its very first lesson.
+    if (unit.tier === "custom") continue;
     for (const id of unit.lessons) {
       const key = `${trackId}/${unit.id}/${id}`;
       if (cur.lessons.has(key)) out.push(key);
@@ -66,7 +70,16 @@ export function computeNextStep(cur: Curriculum, progress: Progress): Omit<NextS
   } else if (lastKey) {
     kind = "next";
     const seq = trackSequence(cur, cur.lessons.get(lastKey)!.trackId);
-    const at = seq.indexOf(lastKey);
+    let at = seq.indexOf(lastKey);
+    if (at === -1) {
+      // The last thing finished was off the road (a custom lesson). Pick up
+      // after the newest lesson finished ON it, in the same track.
+      const newest = seq
+        .filter((k) => done(k))
+        .sort((a, b) => progress.lessons[a].completedAt!.localeCompare(progress.lessons[b].completedAt!))
+        .at(-1);
+      at = newest ? seq.indexOf(newest) : -1;
+    }
     // Forward from where they were, then any gap they skipped earlier in the
     // same track, then anywhere at all.
     target = seq.slice(at + 1).find((k) => !done(k)) ?? seq.find((k) => !done(k)) ?? firstUnfinishedAnywhere();

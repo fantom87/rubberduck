@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { JournalEntry, ProgressWithPractice, Tier } from "@teacher/shared";
 import { api, type TrackView } from "../api/client";
 import { completionCounts } from "../counts";
-import { weekPart } from "../practice";
+import { practiceCards, type StatCard } from "../practice";
 
 const TIER_ORDER: Tier[] = ["foundations", "core", "intermediate", "advanced", "refresher", "custom"];
 
@@ -48,45 +48,34 @@ export default function Stats() {
   if (!progress) return <div className="view-pad">Loading…</div>;
 
   const counts = completionCounts(tracks);
-  const practice = progress.practice;
+  // Only what's there to celebrate. A zero card is a small "you haven't",
+  // and this page is for what you have.
+  const cards: StatCard[] = [];
+  if (counts.lessons > 0) cards.push({ value: String(counts.lessons), label: `lesson${counts.lessons === 1 ? "" : "s"} completed` });
+  if (counts.projects > 0) cards.push({ value: String(counts.projects), label: `project${counts.projects === 1 ? "" : "s"} built` });
+  // An older server may not send the summary; the rest of the page still works.
+  if (progress.practice) cards.push(...practiceCards(progress.practice));
+  if (progress.totals.runs > 0) cards.push({ value: String(progress.totals.runs), label: "code runs" });
+  const checked = progress.totals.checksPassed + progress.totals.checksFailed;
+  if (progress.totals.checksPassed > 0) {
+    cards.push({ value: `${progress.totals.checksPassed}/${checked}`, label: "checks passed" });
+  }
 
   return (
     <div className="view-pad">
       <h1>Your progress</h1>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-value">{counts.lessons}</div>
-          <div className="dim small">lessons completed</div>
+      {cards.length === 0 ? (
+        <p className="dim">Your numbers show up here after your first lesson.</p>
+      ) : (
+        <div className="stats-grid">
+          {cards.map((c) => (
+            <div key={c.label} className="stat-card">
+              <div className="stat-value">{c.value}</div>
+              <div className="dim small">{c.label}</div>
+            </div>
+          ))}
         </div>
-        <div className="stat-card">
-          <div className="stat-value">{practice.totalDays}</div>
-          <div className="dim small">days practiced, all time</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{practice.weekStreak > 0 ? `🔥 ${practice.weekStreak}` : "–"}</div>
-          <div className="dim small">
-            weeks in a row with your goal met
-            {practice.bestWeekStreak > 0 ? ` (best: ${practice.bestWeekStreak})` : ""}
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">
-            {practice.daysThisWeek}
-            <span className="dim">/{practice.weeklyGoal}</span>
-          </div>
-          <div className="dim small">{weekPart(practice)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{progress.totals.runs}</div>
-          <div className="dim small">code runs</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">
-            {progress.totals.checksPassed}<span className="dim">/{progress.totals.checksPassed + progress.totals.checksFailed}</span>
-          </div>
-          <div className="dim small">checks passed</div>
-        </div>
-      </div>
+      )}
 
       {tracks.length > 0 && (
         <>

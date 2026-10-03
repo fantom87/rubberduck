@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Lesson, PracticeSummary } from "@teacher/shared";
 import { buildOpener } from "./opener";
-import { practiceLine, practiceToast, weekPart } from "./practice";
+import { practiceCards, practiceLine, practiceToast, weekPart } from "./practice";
 
 function lesson(starter: string, extra: Partial<Lesson> = {}): Lesson {
   return {
@@ -45,7 +45,7 @@ describe("buildOpener", () => {
       starterFiles: { "index.html": "<!doctype html>\n<!-- 1. Add a heading -->\n<body></body>" },
     });
     expect(buildOpener(html, 5)).toContain("line 2 of `index.html`");
-    expect(buildOpener(html, 5)).toContain("> Add a heading");
+    expect(buildOpener(html, 5)).toContain("```text\nAdd a heading\n```");
     const sql = lesson("", { language: "sql", entry: "query.sql", starterFiles: { "query.sql": "-- 1) Select every title\n" } });
     expect(buildOpener(sql, 4)).toContain("Select every title");
   });
@@ -60,6 +60,31 @@ describe("buildOpener", () => {
     const text = buildOpener(lesson(numbered), 4)!;
     expect(text.startsWith("Goal:")).toBe(true);
     expect(text).not.toContain("Hi!");
+  });
+
+  it("quotes all of a step that runs onto the next lines, and stops at step 2", () => {
+    const starter = [
+      "# 1. Write a while True: loop. Each trip:",
+      "#    - ask for a number",
+      "#    - stop when it's 0",
+      "# 2. Print the total.",
+    ].join("\n");
+    const text = buildOpener(lesson(starter), 5)!;
+    expect(text).toContain("Each trip:\n   - ask for a number\n   - stop when it's 0");
+    expect(text).not.toContain("Print the total");
+  });
+
+  it("puts the quoted step in a code fence, so markdown can't eat <generics> or __dunders__", () => {
+    const starter = "// 1. Make a List<Shape> and call __init__ on it\n";
+    const text = buildOpener(lesson(starter, { entry: "main.py", starterFiles: { "main.py": starter } }), 5)!;
+    expect(text).toContain("```text\nMake a List<Shape> and call __init__ on it\n```");
+  });
+
+  it("escapes markdown in the goal but leaves `code spans` alone", () => {
+    const text = buildOpener(lesson("", { goal: "Add `__str__` to Box<int> so print_box works" }), 5)!;
+    expect(text).toContain("`__str__`");
+    expect(text).toContain("Box\\<int\\>");
+    expect(text).toContain("print\\_box");
   });
 
   it("in a project stage it says the earlier code is still there", () => {
@@ -104,8 +129,21 @@ describe("scoreboard wording", () => {
     expect(line).toBe("🔥 2 weeks in a row · 1 of 3 days this week · 9 days practiced in all");
   });
 
-  it("says when the weekly goal is met", () => {
-    expect(weekPart(summary({ daysThisWeek: 3, goalMetThisWeek: true }))).toBe("Weekly goal met: 3 of 3 days");
+  it("says when the weekly goal is met, and past it never writes '4 of 3'", () => {
+    expect(weekPart(summary({ daysThisWeek: 3, goalMetThisWeek: true }))).toBe("Weekly goal met: 3 days this week");
+    expect(weekPart(summary({ daysThisWeek: 4, goalMetThisWeek: true }))).toBe("Weekly goal met: 4 days this week");
+    const met = summary({ daysThisWeek: 3, goalMetThisWeek: true, totalDays: 5 });
+    expect(practiceToast(met, summary({ daysThisWeek: 4, goalMetThisWeek: true, totalDays: 6 }))).toBe(
+      "Another practice day: 4 this week.",
+    );
+  });
+
+  it("Stats cards never lead with a zero", () => {
+    const fresh = practiceCards(summary({}));
+    expect(fresh).toEqual([{ value: "3", label: "day goal this week" }]);
+    const lapsed = practiceCards(summary({ totalDays: 9, bestWeekStreak: 2 }));
+    for (const c of lapsed) noZero(c.value);
+    expect(lapsed.map((c) => c.label)).toContain("your best run of weeks with the goal met");
   });
 
   it("toasts a new practice day, and the goal being met, and nothing otherwise", () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AssistanceLevel } from "@teacher/shared";
+import type { AssistanceLevel, Settings } from "@teacher/shared";
 import { ASSISTANCE_NAMES } from "@teacher/shared";
 import TutorChat, { CLAUDE_CODE_URL } from "../components/TutorChat";
 import type { TutorEvent } from "../api/tutorStream";
@@ -15,7 +15,8 @@ interface Recommendation {
 interface Props {
   tracks: TrackView[];
   navigate: (r: Route) => void;
-  onDone: () => void;
+  /** the settings exactly as saved, so the app uses the level just chosen */
+  onDone: (settings: Settings) => void;
 }
 
 export default function Onboarding({ tracks, navigate, onDone }: Props) {
@@ -41,13 +42,14 @@ export default function Onboarding({ tracks, navigate, onDone }: Props) {
   }, []);
 
   async function finish(unitId: string | null, level: AssistanceLevel) {
-    const settings = await fetch("/api/settings").then((r) => r.json());
+    const settings = (await fetch("/api/settings").then((r) => r.json())) as Settings;
+    const next: Settings = { ...settings, onboarded: true, assistanceDefault: level };
     await fetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...settings, onboarded: true, assistanceDefault: level }),
+      body: JSON.stringify(next),
     });
-    onDone();
+    onDone(next);
     const track = tracks.find((t) => t.id === trackId);
     const unit = track?.units.find((u) => u.id === unitId) ?? track?.units[0];
     const firstLesson = unit?.lessons[0];

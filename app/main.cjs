@@ -74,8 +74,18 @@ function installerManaged(dir) {
 // thing is one directory you can copy, move, or delete. Two cases fall back to
 // the per-user location instead: an installed build (above), and a folder we
 // can't write to (Program Files, a read-only share).
+// --data-dir=<path> names the data folder outright. The repo's own shortcut
+// passes the repo's data/, so the desktop app and `npm run dev` share one
+// progress file, and rebuilding app/dist (which deletes win-unpacked, and
+// with it anything beside the exe) can't take the learner's history along.
+const DATA_DIR_ARG = (() => {
+  const arg = process.argv.find((a) => a.startsWith("--data-dir="));
+  return arg ? path.resolve(arg.slice("--data-dir=".length).replace(/^"|"$/g, "")) : null;
+})();
+
 const PORTABLE_DATA = (() => {
   if (!PACKAGED) return null;
+  if (DATA_DIR_ARG && writableDir(DATA_DIR_ARG)) return DATA_DIR_ARG;
   // An AppImage never runs from the folder it lives in: it runs from a
   // read-only FUSE mount, or from a scratch directory under /tmp when the user
   // (or CI) sets APPIMAGE_EXTRACT_AND_RUN. Writing data "beside the exe" there
@@ -336,6 +346,42 @@ async function ensureServer() {
 }
 
 /** Spawns the bundled server. Returns false only if there is nothing to spawn. */
+/** Newest mtime of any file under dir, or 0. */
+function newestMtime(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestMtime(full));
+    else {
+      try {
+        newest = Math.max(newest, fs.statSync(full).mtimeMs);
+      } catch {
+        // vanished mid-walk
+      }
+    }
+  }
+  return newest;
+}
+
+/**
+ * From source, is build/server.cjs older than the code it was built from? A
+ * stale bundle paired with a freshly built frontend is how new screens end up
+ * calling routes the old server doesn't have. Packaged builds never ask: their
+ * bundle and frontend were built together.
+ */
+function bundleIsStale() {
+  if (PACKAGED || !PATHS.repoFallback || !fs.existsSync(PATHS.serverEntry)) return false;
+  const built = fs.statSync(PATHS.serverEntry).mtimeMs;
+  const sources = Math.max(newestMtime(path.join(RES, "server", "src")), newestMtime(path.join(RES, "shared", "src")));
+  return sources > built;
+}
+
 function startServer() {
   const env = {
     ...process.env,
@@ -353,13 +399,18 @@ function startServer() {
 
   let command;
   let args;
-  if (fs.existsSync(PATHS.serverEntry)) {
+  const stale = bundleIsStale();
+  if (fs.existsSync(PATHS.serverEntry) && !stale) {
     command = process.execPath;
     args = [PATHS.serverEntry, "--prod"];
   } else if (PATHS.repoFallback && fs.existsSync(PATHS.repoFallback)) {
-    // Running from source without a bundle: keep the old dev path working so
-    // `npm run app` doesn't require `npm run bundle:server` first.
-    logLine(`no bundle at ${PATHS.serverEntry} — falling back to tsx sources (development only).`);
+    // Running from source without a current bundle: run the sources with tsx
+    // so `npm run app` never needs `npm run bundle:server` first.
+    logLine(
+      stale
+        ? `${PATHS.serverEntry} is older than server/src — running the tsx sources instead (development only).`
+        : `no bundle at ${PATHS.serverEntry} — falling back to tsx sources (development only).`,
+    );
     command = "node";
     args = ["--import", "tsx", PATHS.repoFallback, "--prod"];
     delete env.ELECTRON_RUN_AS_NODE;

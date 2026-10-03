@@ -106,6 +106,28 @@ describe("computeNextStep", () => {
     expect(s).toMatchObject({ kind: "next", key: "sql/s1/x", trackTitle: "SQL" });
   });
 
+  it("after a custom lesson, leads back to where the learner was, not to lesson one", () => {
+    const cur = fixture();
+    cur.tracks[0].units.push({ id: "90-custom", title: "Yours", tier: "custom", summary: "", lessons: ["mine"], projects: [] });
+    cur.lessons.set("python/90-custom/mine", {
+      id: "mine",
+      title: "Mine",
+      trackId: "python",
+      unitId: "90-custom",
+      estMinutes: 10,
+    } as unknown as Lesson);
+    const s = computeNextStep(
+      cur,
+      progress(["python/u1/a", "python/u1/b", "python/90-custom/mine"], "python/90-custom/mine", {
+        "python/u1/a": "2026-08-01T00:00:00Z",
+        "python/u1/b": "2026-08-02T00:00:00Z",
+        "python/90-custom/mine": "2026-08-03T00:00:00Z",
+      }),
+    );
+    expect(s).toMatchObject({ kind: "next", key: "python/u2/c" });
+    expect(trackSequence(cur, "python")).not.toContain("python/90-custom/mine");
+  });
+
   it("returns null only when every lesson is done", () => {
     const cur = fixture();
     expect(computeNextStep(cur, progress([...cur.lessons.keys()], "sql/s1/y"))).toBeNull();

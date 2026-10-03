@@ -42,13 +42,23 @@ export default function Home({ navigate, onStartSession }: Props) {
   const [data, setData] = useState<CurriculumResponse | null>(null);
   const [practice, setPractice] = useState<PracticeSummary | null>(null);
   const [next, setNext] = useState<NextStep | null | undefined>(undefined);
+  // Kept apart from next === null, which means "everything is done". A
+  // failure must never show the celebration.
+  const [nextFailed, setNextFailed] = useState(false);
   const [error, setError] = useState(false);
 
   const load = useCallback(() => {
     setError(false);
+    setNextFailed(false);
     api.curriculum().then(setData).catch(() => setError(true));
-    api.progress().then((p) => setPractice(p.practice)).catch(() => {});
-    api.next().then(setNext).catch(() => setNext(null));
+    api.progress().then((p) => setPractice(p.practice ?? null)).catch(() => {});
+    api
+      .next()
+      .then(setNext)
+      .catch(() => {
+        setNext(null);
+        setNextFailed(true);
+      });
   }, []);
 
   useEffect(load, [load]);
@@ -68,7 +78,7 @@ export default function Home({ navigate, onStartSession }: Props) {
 
   const ready = data.tracks.filter((t) => trackStats(t).authored > 0);
   const later = data.tracks.filter((t) => trackStats(t).authored === 0);
-  const firstTime = !next?.last && (practice?.totalDays ?? 0) === 0;
+  const firstTime = !nextFailed && !next?.last && (practice?.totalDays ?? 0) === 0;
   const welcome = welcomeLine(next, practice);
 
   return (
@@ -76,7 +86,9 @@ export default function Home({ navigate, onStartSession }: Props) {
       <h1>{firstTime ? "Let's start" : "Welcome back"}</h1>
       {welcome && <p className="welcome-line">{welcome}</p>}
 
-      {next ? (
+      {nextFailed ? (
+        <p className="welcome-line dim">Pick a track below to carry on.</p>
+      ) : next ? (
         <section className="next-card" aria-labelledby="next-title">
           <div className="next-label">{NEXT_LABEL[next.kind]}</div>
           <h2 id="next-title" className="next-title">

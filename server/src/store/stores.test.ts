@@ -3,7 +3,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readJson, withFileLock, writeJson } from "./jsonStore.js";
-import { completeLesson, getProgress, recordActivity, recordAttempt, recordVisit } from "./progress.js";
+import {
+  completeLesson,
+  getProgress,
+  recordActivity,
+  recordAttempt,
+  recordGoalChange,
+  recordSessionComplete,
+  recordVisit,
+} from "./progress.js";
 import { getSnapshot, listSnapshots, markSnapshotPassed, takeSnapshot } from "./snapshots.js";
 
 let dataDir: string;
@@ -117,6 +125,51 @@ describe("progress store", () => {
     expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/two");
     await recordAttempt(dataDir, "playground/python");
     expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/two");
+  });
+
+  it("a peek at another lesson doesn't bury the one in progress", async () => {
+    await recordAttempt(dataDir, "python/u/working"); // real work
+    await recordVisit(dataDir, "python/u/peeked");
+    await recordActivity(dataDir, 3, "python/u/peeked"); // the few seconds before leaving
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/working");
+    // A full minute in the other lesson is work, and moves it.
+    await recordActivity(dataDir, 60, "python/u/peeked");
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/peeked");
+  });
+
+  it("looking back at a finished lesson doesn't move where you left off", async () => {
+    await completeLesson(dataDir, "python/u/done");
+    await recordAttempt(dataDir, "python/u/next");
+    await recordVisit(dataDir, "python/u/done");
+    await recordAttempt(dataDir, "python/u/done"); // re-running it is reviewing
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/next");
+  });
+
+  it("a visit does move it when nothing else is in progress", async () => {
+    await recordVisit(dataDir, "python/u/a");
+    await recordVisit(dataDir, "python/u/b"); // a has no work yet
+    expect((await getProgress(dataDir)).lastActive?.key).toBe("python/u/b");
+  });
+
+  it("a finished 10-minute session counts the day on its own", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 3, 9, 0, 0));
+    const p = await recordSessionComplete(dataDir);
+    expect(p.practiceDays).toEqual(["2026-06-03"]);
+  });
+
+  it("records goal changes by the Monday they take effect, the old goal first", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 1, 12, 0, 0)); // Thursday Oct 1
+    await recordGoalChange(dataDir, 3, 4);
+    let p = await recordGoalChange(dataDir, 4, 5); // same week: replaces
+    expect(p.goalHistory).toEqual([
+      { from: "0000-00-00", goal: 3 },
+      { from: "2026-09-28", goal: 5 },
+    ]);
+    vi.setSystemTime(new Date(2026, 9, 6, 12, 0, 0)); // next week
+    p = await recordGoalChange(dataDir, 5, 2);
+    expect(p.goalHistory?.map((h) => h.from)).toEqual(["0000-00-00", "2026-09-28", "2026-10-05"]);
   });
 
   it("migrates a version-1 file: completions and the last counted day become practice days", async () => {

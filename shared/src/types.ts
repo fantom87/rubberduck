@@ -200,8 +200,16 @@ export interface Progress {
   practiceDays: string[];
   /** today's running activity tally toward the minutes rule */
   today: { date: string; minutes: number };
-  /** the lesson most recently opened, run, or worked in; "pick up" goes here */
+  /** the unfinished lesson most recently worked in (or opened, if nothing is
+   *  in progress); "pick up where you left off" goes here */
   lastActive?: { key: string; at: string };
+  /**
+   * Every change of the weekly goal, oldest first: from = the Monday it took
+   * effect, or "0000-00-00" for the goal before the first recorded change.
+   * Past weeks are judged by the goal they were lived under, so changing the
+   * goal never rewrites a streak already earned.
+   */
+  goalHistory?: { from: string; goal: number }[];
   totals: { runs: number; checksPassed: number; checksFailed: number };
   /** persisted-data schema version; 2 replaced the daily streak with practiceDays */
   version?: number;

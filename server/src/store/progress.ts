@@ -1,7 +1,7 @@
 import path from "node:path";
-import type { Progress } from "@teacher/shared";
+import type { LessonProgress, Progress } from "@teacher/shared";
 import { readJson, withFileLock, writeJsonInLock } from "./jsonStore.js";
-import { PRACTICE_MINUTES, isDateString, localDateString, markPracticeDay } from "./practice.js";
+import { GOAL_EPOCH, PRACTICE_MINUTES, isDateString, localDateString, markPracticeDay, weekStart } from "./practice.js";
 
 function emptyProgress(): Progress {
   // Fresh object every call — read-modify-write mutates the value readJson
@@ -25,8 +25,31 @@ function isLessonKey(key: string): boolean {
   return !/^(playground|placement)[/-]/.test(key);
 }
 
-function touchLastActive(p: Progress, key: string): void {
-  if (isLessonKey(key)) p.lastActive = { key, at: new Date().toISOString() };
+/** Has the learner actually done something in this lesson? A run, or a
+ *  minute of active time. Opening it to look doesn't count. */
+function hasWork(lp: LessonProgress | undefined): boolean {
+  return !!lp && (lp.attempts > 0 || lp.timeSpentMin >= 1);
+}
+
+/**
+ * Move "where you left off" (Home's Pick up button) to this lesson, if the
+ * reason is good enough:
+ *
+ *   complete  always: Home's "next" is worked out from what was finished last
+ *   work      a run, or a full minute in the lesson, unless it's already done
+ *             (re-running a finished lesson is reviewing, not where you are)
+ *   visit     only if nothing unfinished with work in it would be displaced,
+ *             so a peek at another lesson can't bury the one in progress
+ */
+function touchLastActive(p: Progress, key: string, reason: "complete" | "work" | "visit"): void {
+  if (!isLessonKey(key)) return;
+  if (reason !== "complete" && p.lessons[key]?.completedAt) return;
+  if (reason === "visit") {
+    const current = p.lastActive?.key;
+    const lp = current ? p.lessons[current] : undefined;
+    if (current && current !== key && lp && !lp.completedAt && hasWork(lp)) return;
+  }
+  p.lastActive = { key, at: new Date().toISOString() };
 }
 
 /**
@@ -48,6 +71,13 @@ function migrate(raw: Record<string, unknown>, p: Progress): void {
     p.practiceDays = days;
   }
   p.practiceDays = [...new Set(p.practiceDays.filter(isDateString))].sort();
+  if (p.goalHistory !== undefined) {
+    p.goalHistory = Array.isArray(p.goalHistory)
+      ? p.goalHistory.filter(
+          (h) => h && typeof h.from === "string" && Number.isInteger(h.goal) && h.goal >= 1 && h.goal <= 7,
+        )
+      : [];
+  }
   if (!p.today || !isDateString(p.today.date) || typeof p.today.minutes !== "number") {
     p.today = isDateString(old.todayDate)
       ? { date: old.todayDate, minutes: typeof old.todayMinutes === "number" ? old.todayMinutes : 0 }
@@ -88,14 +118,42 @@ export async function recordAttempt(dataDir: string, lessonKey: string): Promise
     const lp = (p.lessons[lessonKey] ??= { attempts: 0, timeSpentMin: 0 });
     lp.attempts += 1;
     p.totals.runs += 1;
-    touchLastActive(p, lessonKey);
+    touchLastActive(p, lessonKey, "work");
   });
 }
 
-/** Opening a lesson is enough to make it the one "pick up where you left off"
- *  returns to — nothing has to be run or typed first. */
+/** Opening a lesson makes it Home's pick-up target when nothing else is in
+ *  progress. See touchLastActive for when it doesn't. */
 export async function recordVisit(dataDir: string, lessonKey: string): Promise<Progress> {
-  return mutateProgress(dataDir, (p) => touchLastActive(p, lessonKey));
+  return mutateProgress(dataDir, (p) => touchLastActive(p, lessonKey, "visit"));
+}
+
+/**
+ * A "just 10 minutes" session ran to its end. That counts the day, whether
+ * the ten minutes went on one lesson, two, or the docs. The session is the
+ * promise the learner made, and keeping it is the point.
+ */
+export async function recordSessionComplete(dataDir: string): Promise<Progress> {
+  return mutateProgress(dataDir, (p) => {
+    markPracticeDay(p.practiceDays, localDateString());
+  });
+}
+
+/**
+ * The weekly goal changed in Settings. Recorded with the Monday it takes
+ * effect, so past weeks keep being judged by the goal they had. The first
+ * change also records the old goal as the one in force since the beginning.
+ */
+export async function recordGoalChange(dataDir: string, oldGoal: number, newGoal: number): Promise<Progress> {
+  return mutateProgress(dataDir, (p) => {
+    const history = p.goalHistory ?? [];
+    if (history.length === 0) history.push({ from: GOAL_EPOCH, goal: oldGoal });
+    const from = weekStart(localDateString());
+    // Several changes in one week: the last one is that week's goal.
+    p.goalHistory = [...history.filter((h) => h.from !== from), { from, goal: newGoal }].sort((a, b) =>
+      a.from.localeCompare(b.from),
+    );
+  });
 }
 
 /**
@@ -115,7 +173,7 @@ export async function completeLesson(
       first = true;
     }
     markPracticeDay(p.practiceDays, localDateString());
-    touchLastActive(p, lessonKey);
+    touchLastActive(p, lessonKey, "complete");
   });
   return { progress, first };
 }
@@ -139,7 +197,8 @@ export async function recordActivity(dataDir: string, seconds: number, lessonKey
     if (lessonKey) {
       const lp = (p.lessons[lessonKey] ??= { attempts: 0, timeSpentMin: 0 });
       lp.timeSpentMin += minutes;
-      touchLastActive(p, lessonKey);
+      // A few seconds' look isn't work; a minute in the lesson is.
+      if (lp.timeSpentMin >= 1) touchLastActive(p, lessonKey, "work");
     }
     // A hair under the threshold still counts: heartbeats are whole minutes
     // measured by a browser timer, and 9.99 minutes is ten.

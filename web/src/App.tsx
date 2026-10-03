@@ -10,7 +10,7 @@ import SettingsView from "./views/Settings";
 import Onboarding from "./views/Onboarding";
 import DocsDrawer from "./components/DocsDrawer";
 import SessionTimer from "./components/SessionTimer";
-import { endLessonActivity } from "./activity";
+import { PRACTICE_EVENT, endLessonActivity } from "./activity";
 import { practiceToast } from "./practice";
 import { CLAUDE_CODE_URL } from "./components/TutorChat";
 import { API_OFFLINE_EVENT, API_ONLINE_EVENT, api, tutorAvailability, type TutorState, type TrackView } from "./api/client";
@@ -33,15 +33,14 @@ function focusEditor() {
 
 const SESSION_MINUTES = 10;
 const SESSION_KEY = "session";
-// A session that ended while the app was closed still gets its "good place to
-// stop" moment if the app comes back soon after; much later, it's just gone.
-const SESSION_GRACE_MS = 30 * 60_000;
 
+// A session belongs to one sitting. sessionStorage survives a reload but not
+// closing the app, so the countdown can't run on while the app is shut and
+// then greet the next launch with "That's your 10 minutes".
 function storedSession(): { endsAt: number } | null {
   try {
-    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as { endsAt?: unknown } | null;
-    if (!s || typeof s.endsAt !== "number") return null;
-    if (Date.now() > s.endsAt + SESSION_GRACE_MS) return null;
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? "null") as { endsAt?: unknown } | null;
+    if (!s || typeof s.endsAt !== "number" || Date.now() >= s.endsAt) return null;
     return { endsAt: s.endsAt };
   } catch {
     return null;
@@ -50,12 +49,14 @@ function storedSession(): { endsAt: number } | null {
 
 function saveSession(s: { endsAt: number } | null): void {
   try {
-    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-    else localStorage.removeItem(SESSION_KEY);
+    if (s) sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    else sessionStorage.removeItem(SESSION_KEY);
   } catch {
     // storage unavailable — the session still runs for this visit
   }
 }
+
+const SESSION_DONE_TEXT = `⏱ That's your ${SESSION_MINUTES} minutes. A good place to stop, or keep going if you're in the flow.`;
 
 export default function App() {
   // localStorage is only the pre-fetch paint hint — settings.json is the
@@ -73,10 +74,10 @@ export default function App() {
   const [practice, setPractice] = useState<PracticeSummary | null>(null);
   const practiceRef = useRef<PracticeSummary | null>(null);
   const [session, setSession] = useState(storedSession);
-  const [sessionDone, setSessionDone] = useState(() => {
-    const s = storedSession();
-    return s !== null && Date.now() >= s.endsAt;
-  });
+  const [sessionDone, setSessionDone] = useState(false);
+  // The server call that counts a finished session's day; Stop here and Keep
+  // going wait for it, so their scoreboard read includes it.
+  const sessionRecorded = useRef<Promise<unknown>>(Promise.resolve());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDoc, setDrawerDoc] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -143,23 +144,38 @@ export default function App() {
    * Re-read the scoreboard. With `announce`, say what changed: a day that
    * just counted, a weekly goal just met. `fallback` is said when nothing did.
    */
+  const applyPractice = useCallback(
+    (next: PracticeSummary, announce: boolean, fallback?: string) => {
+      const prev = practiceRef.current;
+      const message = announce && prev ? practiceToast(prev, next) : null;
+      if (message ?? fallback) showToast((message ?? fallback)!);
+      practiceRef.current = next;
+      setPractice(next);
+    },
+    [showToast],
+  );
+
   const refreshPractice = useCallback(
     (announce = false, fallback?: string) => {
       api
         .progress()
         .then((p) => {
-          const prev = practiceRef.current;
-          const message = announce && prev ? practiceToast(prev, p.practice) : null;
-          if (message ?? fallback) showToast((message ?? fallback)!);
-          practiceRef.current = p.practice;
-          setPractice(p.practice);
+          if (p.practice) applyPractice(p.practice, announce, fallback);
         })
         .catch(() => {});
     },
-    [showToast],
+    [applyPractice],
   );
 
   useEffect(() => refreshPractice(), [refreshPractice]);
+
+  // Every activity report brings the scoreboard back with it, so a day earned
+  // by ten minutes of work (no lesson finished) is announced as it happens.
+  useEffect(() => {
+    const onPractice = (e: Event) => applyPractice((e as CustomEvent<PracticeSummary>).detail, true);
+    window.addEventListener(PRACTICE_EVENT, onPractice);
+    return () => window.removeEventListener(PRACTICE_EVENT, onPractice);
+  }, [applyPractice]);
 
   const celebrate = useCallback(() => {
     refreshPractice(true);
@@ -182,18 +198,24 @@ export default function App() {
     setSessionDone(false);
   }, []);
 
-  const handleSessionDone = useCallback(() => setSessionDone(true), []);
+  // The countdown reached zero with the app open: the day counts (see
+  // recordSessionComplete). Announced when the learner answers the banner.
+  const handleSessionDone = useCallback(() => {
+    setSessionDone(true);
+    sessionRecorded.current = api.completeSession().catch(() => {});
+  }, []);
 
   /** "Stop here": the draft and the last partial minute are saved, then home. */
   async function stopHere() {
     clearSession();
-    await endLessonActivity();
+    await Promise.all([endLessonActivity(), sessionRecorded.current]);
     setRoute({ view: "home" });
-    refreshPractice(true, "Saved. Nice work, that's ten minutes done.");
+    refreshPractice(true, "Saved. That's ten minutes done.");
   }
 
-  function keepGoing() {
+  async function keepGoing() {
     clearSession();
+    await sessionRecorded.current;
     refreshPractice(true);
   }
 
@@ -248,12 +270,12 @@ export default function App() {
   const banners = (
     <>
       {sessionDone && (
-        <div className="app-banner session-done" role="status">
-          <span>⏱ That's your {SESSION_MINUTES} minutes. A good place to stop, or keep going if you're in the flow.</span>
+        <div className="app-banner session-done">
+          <span>{SESSION_DONE_TEXT}</span>
           <button className="primary" onClick={() => void stopHere()}>
             Stop here
           </button>
-          <button onClick={keepGoing}>Keep going</button>
+          <button onClick={() => void keepGoing()}>Keep going</button>
         </div>
       )}
       {offline && (
@@ -323,7 +345,7 @@ export default function App() {
             <Onboarding
               tracks={tracks}
               navigate={setRoute}
-              onDone={() => setSettings((s) => (s ? { ...s, onboarded: true } : s))}
+              onDone={applySettings}
             />
           </main>
         </div>
@@ -425,19 +447,25 @@ export default function App() {
           {route.view === "stats" && <Stats />}
           {route.view === "settings" && (
             <SettingsView
-              onSettingsChange={(s) => {
-                applySettings(s);
-                refreshPractice(); // the weekly goal may have changed
-              }}
+              onSettingsChange={applySettings}
+              // After the save lands, not before: the scoreboard is computed
+              // from the goal on disk.
+              onSaved={() => refreshPractice()}
             />
           )}
         </main>
         <DocsDrawer open={drawerOpen} initial={drawerDoc} onClose={() => setDrawerOpen(false)} />
         {toast && (
-          <div className="toast" role="status">
+          <div className="toast" aria-hidden="true">
             {toast}
           </div>
         )}
+        {/* One live region, always mounted. Screen readers announce changes to
+            an existing region; one that appears with its text already inside
+            is often read out by nobody. */}
+        <div className="sr-only" role="status">
+          {toast ?? (sessionDone ? SESSION_DONE_TEXT : "")}
+        </div>
         {confetti && (
           <div className="confetti" aria-hidden="true">
             {Array.from({ length: 24 }, (_, i) => (

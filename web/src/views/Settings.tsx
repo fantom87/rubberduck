@@ -24,7 +24,14 @@ function tutorLine(health: Health): { ok: boolean; text: string } {
   return { ok: true, text: "Tutor connection: checking…" };
 }
 
-export default function Settings({ onSettingsChange }: { onSettingsChange: (s: SettingsType) => void }) {
+export default function Settings({
+  onSettingsChange,
+  onSaved,
+}: {
+  onSettingsChange: (s: SettingsType) => void;
+  /** after a save has landed (or rolled back) */
+  onSaved?: () => void;
+}) {
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [profile, setProfile] = useState("");
@@ -64,6 +71,7 @@ export default function Settings({ onSettingsChange }: { onSettingsChange: (s: S
       }
       showToast(`Couldn't save settings: ${err instanceof Error ? err.message : String(err)}`);
     }
+    onSaved?.();
   }
 
   async function saveProfile() {

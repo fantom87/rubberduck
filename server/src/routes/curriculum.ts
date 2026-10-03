@@ -61,6 +61,12 @@ export function curriculumRoutes(contentDir: string, dataDir: string): Router {
   // localStorage and vanished whenever the app's origin changed).
   r.get("/api/next", async (_req, res) => {
     const cur = await getCurriculum(contentDir);
+    // No lessons loaded is a broken content tree, not a finished learner.
+    // It must never read as "you've done everything".
+    if (cur.lessons.size === 0) {
+      res.status(503).json({ error: "the curriculum didn't load; see Content problems" });
+      return;
+    }
     const progress = await getProgress(dataDir);
     const step = computeNextStep(cur, progress);
     if (!step) {

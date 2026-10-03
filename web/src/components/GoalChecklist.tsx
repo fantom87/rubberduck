@@ -45,13 +45,17 @@ export default function GoalChecklist({ checks, results, previews, checking, onC
   // A small win the moment each check goes green, not only when the whole
   // lesson completes. Tracks the last state per check and pops the ones that
   // just turned to pass.
-  const previous = useRef<Map<string, CheckState>>(new Map());
+  const previous = useRef<Map<string, CheckState> | null>(null);
   const popTimer = useRef<number | undefined>(undefined);
   const [popped, setPopped] = useState<Set<string>>(new Set());
   const signature = rows.map((r) => `${r.spec.id}:${r.state}`).join("|");
   useEffect(() => {
-    const fresh = rows.filter((r) => r.state === "pass" && previous.current.get(r.spec.id) !== "pass").map((r) => r.spec.id);
+    const before = previous.current;
     previous.current = new Map(rows.map((r) => [r.spec.id, r.state]));
+    // The first look is a baseline, not news: a checklist that mounts with
+    // checks already passing (focus mode toggled on, say) has nothing to pop.
+    if (before === null) return;
+    const fresh = rows.filter((r) => r.state === "pass" && before.get(r.spec.id) !== "pass").map((r) => r.spec.id);
     if (fresh.length === 0) return;
     // The timer lives in a ref, not an effect cleanup: a cleanup would cancel
     // it whenever the states change again inside POP_MS, and the highlight
@@ -84,6 +88,9 @@ export default function GoalChecklist({ checks, results, previews, checking, onC
                 <div className="check-message unreachable-message">{result.message}</div>
               )}
               {!compact && state === "fail" && result && <div className="check-message">{result.message}</div>}
+              {compact && state === "fail" && result && (
+                <span className="check-message-inline"> — {result.message.split("\n")[0]}</span>
+              )}
             </span>
           </li>
         ))}

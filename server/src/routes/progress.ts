@@ -5,8 +5,11 @@ import { DEFAULT_SETTINGS, settingsSchema, type Progress, type ProgressWithPract
 import { isKnownLessonKey } from "../curriculum/loader.js";
 import { readJson } from "../store/jsonStore.js";
 import { localDateString, summarizePractice } from "../store/practice.js";
-import { getProgress, recordActivity, recordVisit } from "../store/progress.js";
+import { getProgress, recordActivity, recordSessionComplete, recordVisit } from "../store/progress.js";
 import { resetAllTutorState } from "../tutor/service.js";
+
+/** Activity ticks are a minute apart; twice that allows for a late timer. */
+const MAX_TICK_SECONDS = 120;
 
 /** The weekly goal lives in settings; a missing or hand-mangled value is the default. */
 async function weeklyGoal(dataDir: string): Promise<number> {
@@ -16,7 +19,10 @@ async function weeklyGoal(dataDir: string): Promise<number> {
 }
 
 async function withPractice(dataDir: string, p: Progress): Promise<ProgressWithPractice> {
-  return { ...p, practice: summarizePractice(p.practiceDays, await weeklyGoal(dataDir), localDateString()) };
+  return {
+    ...p,
+    practice: summarizePractice(p.practiceDays, await weeklyGoal(dataDir), localDateString(), p.goalHistory),
+  };
 }
 
 export function progressRoutes(dataDir: string): Router {
@@ -66,7 +72,17 @@ export function progressRoutes(dataDir: string): Router {
     }
     const lessonKey =
       typeof req.body?.lessonKey === "string" && req.body.lessonKey ? (req.body.lessonKey as string) : undefined;
-    res.json(await withPractice(dataDir, await recordActivity(dataDir, seconds, lessonKey)));
+    // No single report is credited with more than two ticks. The client
+    // clamps too, but this is the line that holds: a laptop that slept with
+    // a lesson open would otherwise send its whole nap as one tick, and an
+    // hour of sleep would earn the day on its own.
+    const credited = Math.min(seconds, MAX_TICK_SECONDS);
+    res.json(await withPractice(dataDir, await recordActivity(dataDir, credited, lessonKey)));
+  });
+
+  // A "just 10 minutes" session reached its end with the app open.
+  r.post("/api/progress/session", async (_req, res) => {
+    res.json(await withPractice(dataDir, await recordSessionComplete(dataDir)));
   });
 
   // Opening a lesson makes it the one "pick up where you left off" returns to.

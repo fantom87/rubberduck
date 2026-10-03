@@ -87,6 +87,11 @@ export default function TutorChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const itemsRef = useRef<ChatItem[]>(items);
   itemsRef.current = items;
+  // The opener is fixed at the first send, so a later slider change can't
+  // rewrite what the tutor "said" first (undefined = not fixed yet), and it
+  // counts as delivered only once the server has taken it.
+  const [pinnedOpener, setPinnedOpener] = useState<string | null | undefined>(undefined);
+  const openerDelivered = useRef(false);
 
   function clearWatchdog() {
     if (watchdogRef.current !== undefined) {
@@ -127,6 +132,8 @@ export default function TutorChat({
     streamingRef.current = false;
     setCanRetry(false);
     stickToBottomRef.current = true;
+    setPinnedOpener(undefined);
+    openerDelivered.current = false;
     const close = openTutorStream(lessonKey, (e) => {
       // Any activity proves the turn is alive — push the watchdog out.
       if (busyRef.current) armWatchdog();
@@ -187,11 +194,13 @@ export default function TutorChat({
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busyRef.current) return;
-    // On the first message of a conversation, tell the real tutor what the
-    // opener already said on its behalf, so it carries on from there instead
-    // of greeting the learner a second time. Read before this message joins
-    // the transcript.
-    const openerShown = itemsRef.current.length === 0 && opener ? opener : undefined;
+    // Until the tutor has answered once, tell it what the opener said on its
+    // behalf, so it carries on from there instead of greeting the learner a
+    // second time. That includes a retry after a failed first send.
+    const pinned = pinnedOpener === undefined ? (opener ?? null) : pinnedOpener;
+    if (pinnedOpener === undefined) setPinnedOpener(pinned);
+    const tutorHasReplied = itemsRef.current.some((i) => i.role === "assistant");
+    const openerShown = !openerDelivered.current && !tutorHasReplied && pinned ? pinned : undefined;
     setCanRetry(false);
     lastSentRef.current = trimmed;
     setItems((prev) => [...prev, { role: "user", text: trimmed }]);
@@ -213,6 +222,7 @@ export default function TutorChat({
           ...(openerShown ? { opener: openerShown } : {}),
         }),
       });
+      if (res.ok && openerShown) openerDelivered.current = true;
       if (!res.ok) {
         let message = `The tutor couldn't take that message (HTTP ${res.status}).`;
         try {
@@ -274,7 +284,14 @@ export default function TutorChat({
     streamingRef.current = false;
     setCanRetry(false);
     lastSentRef.current = null;
+    setPinnedOpener(undefined);
+    openerDelivered.current = false;
   }
+
+  // Before the first send the opener follows the slider; after it, it's fixed.
+  // A transcript replayed from the server on remount shows no opener: the
+  // conversation already has a real first line.
+  const shownOpener = pinnedOpener !== undefined ? pinnedOpener : items.length === 0 ? opener : null;
 
   function handleInputKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -368,9 +385,9 @@ export default function TutorChat({
         </button>
       </div>
       <div className="chat-scroll" ref={scrollRef} onScroll={handleScroll} aria-live="polite">
-        {opener ? (
+        {shownOpener ? (
           <div className="chat-msg assistant opener">
-            <AssistantMessage text={opener} />
+            <AssistantMessage text={shownOpener} />
           </div>
         ) : (
           items.length === 0 && (

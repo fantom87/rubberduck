@@ -51,16 +51,40 @@ export function markPracticeDay(days: string[], date: string): boolean {
   return true;
 }
 
-export function summarizePractice(days: string[], weeklyGoal: number, today: string): PracticeSummary {
+export interface GoalChange {
+  from: string;
+  goal: number;
+}
+
+/** Before the first recorded change, the goal was whatever it was then. */
+export const GOAL_EPOCH = "0000-00-00";
+
+export function summarizePractice(
+  days: string[],
+  weeklyGoal: number,
+  today: string,
+  history: GoalChange[] = [],
+): PracticeSummary {
   const perWeek = new Map<string, number>();
   for (const day of new Set(days)) {
     if (!isDateString(day) || day > today) continue; // a hand edit or a clock change
     const w = weekStart(day);
     perWeek.set(w, (perWeek.get(w) ?? 0) + 1);
   }
-  const met = (w: string) => (perWeek.get(w) ?? 0) >= weeklyGoal;
-
   const thisWeek = weekStart(today);
+  // Each past week is held to the goal in force that week. Without this,
+  // raising the goal from 3 to 4 would retroactively fail every 3-day week
+  // and wipe a streak already earned. The current week always uses today's
+  // goal, which is the one on screen.
+  const ordered = [...history].filter((h) => h.goal >= 1).sort((a, b) => a.from.localeCompare(b.from));
+  const goalFor = (w: string): number => {
+    if (w >= thisWeek || ordered.length === 0) return weeklyGoal;
+    let goal = ordered[0].goal;
+    for (const h of ordered) if (h.from <= w) goal = h.goal;
+    return goal;
+  };
+  const met = (w: string) => (perWeek.get(w) ?? 0) >= goalFor(w);
+
   const daysThisWeek = perWeek.get(thisWeek) ?? 0;
   const goalMetThisWeek = daysThisWeek >= weeklyGoal;
 

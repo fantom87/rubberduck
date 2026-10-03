@@ -31,6 +31,9 @@ const ps = [
   "$ws = New-Object -ComObject WScript.Shell",
   `$s = $ws.CreateShortcut(${q(link)})`,
   `$s.TargetPath = ${q(target)}`,
+  // The repo's data/, not a folder beside the exe: app/dist is rebuilt from
+  // scratch, and the dev server reads data/ too. See DATA_DIR_ARG in main.cjs.
+  `$s.Arguments = ${q(`--data-dir="${path.join(ROOT, "data")}"`)}`,
   `$s.WorkingDirectory = ${q(path.dirname(target))}`,
   `$s.IconLocation = ${q(icon)}`,
   "$s.Description = 'Learn programming with an AI tutor'",

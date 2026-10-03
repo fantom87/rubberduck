@@ -2,6 +2,7 @@ import path from "node:path";
 import { Router } from "express";
 import { DEFAULT_SETTINGS, settingsSchema, type Settings } from "@teacher/shared";
 import { readJson, writeJson } from "../store/jsonStore.js";
+import { recordGoalChange } from "../store/progress.js";
 
 // A hand-edited settings.json must never crash the frontend: keep every key
 // that still validates, fill the rest from defaults (deep for editor.*).
@@ -54,7 +55,12 @@ export function settingsRoutes(dataDir: string): Router {
       res.status(400).json({ error: parsed.error.issues.map((i) => i.message).join("; ") });
       return;
     }
+    const before = await readJson<Record<string, unknown>>(file, {});
+    const oldGoal = settingsSchema.shape.weeklyGoal.safeParse(before?.weeklyGoal);
     await writeJson(file, parsed.data);
+    // Past weeks keep the goal they were lived under (see recordGoalChange).
+    const previous = oldGoal.success ? oldGoal.data : DEFAULT_SETTINGS.weeklyGoal;
+    if (previous !== parsed.data.weeklyGoal) await recordGoalChange(dataDir, previous, parsed.data.weeklyGoal);
     res.status(204).end();
   });
 

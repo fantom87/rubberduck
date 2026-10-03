@@ -1,4 +1,4 @@
-import type { CheckResult, CheckSpec, Lesson, NextStep, ProgressWithPractice, Settings, Tier, Language, RunnerKind, JournalEntry } from "@teacher/shared";
+import type { CheckResult, CheckSpec, Lesson, NextStep, PracticeSummary, ProgressWithPractice, Settings, Tier, Language, RunnerKind, JournalEntry } from "@teacher/shared";
 
 export interface LessonRow {
   id: string;
@@ -214,8 +214,23 @@ export const api = {
   progress: () => get<ProgressWithPractice>("/api/progress"),
   /** The one thing to open next, for the Home page's big button. Null when everything is done. */
   next: () => get<NextStep | null>("/api/next"),
-  reportActivity: (seconds: number, lessonKey?: string) =>
-    send("POST", "/api/progress/activity", { seconds, lessonKey }).then(() => undefined),
+  /** Returns the fresh scoreboard, or null for a keepalive report sent as the
+   *  page closes (nobody is left to read it). */
+  reportActivity: async (seconds: number, lessonKey?: string, keepalive = false): Promise<PracticeSummary | null> => {
+    if (keepalive) {
+      await fetch("/api/progress/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds, lessonKey }),
+        keepalive: true,
+      });
+      return null;
+    }
+    const res = await send("POST", "/api/progress/activity", { seconds, lessonKey });
+    return ((await res.json()) as ProgressWithPractice).practice ?? null;
+  },
+  /** A 10-minute session ran to its end: the day counts. */
+  completeSession: () => send("POST", "/api/progress/session").then(() => undefined),
   /** Opening a lesson makes it the one "pick up where you left off" returns to. */
   visit: (lessonKey: string) => send("POST", "/api/progress/visit", { lessonKey }).then(() => undefined),
   resetProgress: () => send("POST", "/api/progress/reset", undefined, { "x-confirm": "reset" }).then(() => undefined),

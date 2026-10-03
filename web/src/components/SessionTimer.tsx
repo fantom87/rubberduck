@@ -8,8 +8,8 @@ interface Props {
 
 /**
  * The quiet countdown in the top bar. role="timer" keeps screen readers from
- * announcing every second; the label carries the full reading when focused.
- * Only this component re-renders each second.
+ * announcing every second; it takes keyboard focus, and its label carries the
+ * full reading when it has it. Only this component re-renders each second.
  */
 export default function SessionTimer({ endsAt, onDone, onCancel }: Props) {
   const [now, setNow] = useState(() => Date.now());
@@ -31,7 +31,12 @@ export default function SessionTimer({ endsAt, onDone, onCancel }: Props) {
   const minutes = Math.floor(left / 60_000);
   const seconds = Math.floor((left % 60_000) / 1000);
   return (
-    <span className="session-chip" role="timer" aria-label={`${minutes} minutes ${seconds} seconds left in this session`}>
+    <span
+      className="session-chip"
+      role="timer"
+      tabIndex={0}
+      aria-label={`${minutes} minutes ${seconds} seconds left in this session`}
+    >
       ⏱ {minutes}:{String(seconds).padStart(2, "0")}
       <button className="session-cancel" aria-label="End the session now" title="End the session now" onClick={onCancel}>
         ✕
